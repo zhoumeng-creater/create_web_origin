@@ -9,18 +9,18 @@ public/Musicdata/
 public/outputs/
 
 # music
-.wav
-.ogg
-.mp3
+*.wav
+*.ogg
+*.mp3
 
 # video
-.mp4
-.mov
+*.mp4
+*.mov
 
 # app
-.exe
-.app
-.dmg
+*.exe
+*.app
+*.dmg
 
 # Python
 __pycache__/
