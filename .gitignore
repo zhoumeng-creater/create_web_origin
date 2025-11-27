@@ -22,6 +22,9 @@ public/outputs/
 *.app
 *.dmg
 
+# Model
+AnimationGPT/
+
 # Python
 __pycache__/
 *.py[cod]
