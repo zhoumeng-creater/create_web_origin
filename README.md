@@ -22,3 +22,17 @@
 cd vite-project
 npm install
 npm run dev
+```
+
+
+
+
+
+## 后端启动方法
+
+```python
+animation_back.py
+```
+
+
+
