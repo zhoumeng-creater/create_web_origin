@@ -999,82 +999,82 @@ def music_debug(job_id: str):
 
 # ========== 异步执行器 ==========
 async def _run_music_job(job_id: str, inb: MusicIn):
-    job = MUSIC_JOBS[job_id]
+    """
+    最终稳定版 MusicGPT 异步任务
+    - 只向 MusicGPT 传 .wav 作为 --output
+    - 等待 MusicGPT 自己完成 .part → .wav
+    - 防御性访问 MUSIC_JOBS，避免 KeyError
+    """
+
+    job = MUSIC_JOBS.get(job_id)
+    if not job:
+        # job 可能已被清理或服务重启
+        return
+
     job["status"] = "RUNNING"
-    job["progress"] = 1
-
-    final_name = f"{int(time.time())}.wav"
-    tmp_name   = f".{final_name}.part"
-    tmp_path = AUDIO_PUBLIC_DIR / tmp_name
-    final_path = AUDIO_PUBLIC_DIR / final_name
-
-    cmd = [
-        MUSICGPT_BIN,
-        inb.prompt,
-        "--secs", str(inb.duration),
-        "--no-playback",
-        "--no-interactive",
-        "--output", str(tmp_path),
-    ]
-
-    start_ts = time.time()
+    job["progress"] = 5
 
     try:
+        # ===== 使用已准备好的英文 prompt =====
+        prompt = job["prompt_en"]
+
+        # ===== 音乐时长 =====
+        secs = int(job.get("duration") or DEFAULT_SECS)
+
+        # ===== 只生成最终 wav 名称（非常关键）=====
+        ts = int(time.time())
+        final_name = f"{ts}.wav"
+        final_path = AUDIO_PUBLIC_DIR / final_name
+
+        # ===== 构造 MusicGPT CLI（注意：不传 .wav.part）=====
+        cmd = [
+            str(MUSICGPT_BIN),
+            prompt,
+            "--secs", str(secs),
+            "--no-playback",
+            "--no-interactive",
+            "--output", str(final_path),   # ✅ 只传 .wav
+        ]
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
             env=_music_env(),
             creationflags=_win_high_priority_flags(),
         )
 
-        stdout_buf, stderr_buf = [], []
-        readers = []
-        if proc.stdout:
-            readers.append(asyncio.create_task(_read_stream(proc.stdout, stdout_buf, job)))
-        if proc.stderr:
-            readers.append(asyncio.create_task(_read_stream(proc.stderr, stderr_buf, job)))
+        job["progress"] = 30
 
-        # 进度推进到 90%
-        while True:
-            if time.time() - start_ts > MAX_RUNTIME:
-                with contextlib.suppress(Exception):
-                    proc.kill()
-                job["status"] = "FAILED"
-                job["error"]  = "生成超时"
-                return
-
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=1.0)
-                break
-            except asyncio.TimeoutError:
-                job["progress"] = min(90, job["progress"] + 2)
-
-        await asyncio.gather(*readers, return_exceptions=True)
+        # ===== 等待 MusicGPT 进程结束 =====
+        await proc.communicate()
 
         if proc.returncode != 0:
             job["status"] = "FAILED"
-            job["error"]  = "\n".join(stderr_buf[-30:])
+            job["error"] = "MusicGPT 执行失败（进程返回码非 0）"
             return
 
-        job["progress"] = 95
+        # ===== 等待最终 .wav 文件出现（MusicGPT 内部会处理 .part）=====
+        found = False
+        for _ in range(80):  # 最多等待 8 秒
+            if final_path.exists() and final_path.stat().st_size > 0:
+                found = True
+                break
+            await asyncio.sleep(0.1)
 
-        await asyncio.sleep(0.2)
-        if not tmp_path.exists():
+        if not found:
             job["status"] = "FAILED"
-            job["error"]  = "未找到输出文件"
+            job["error"] = "未检测到生成完成的音频文件"
             return
 
-        os.replace(tmp_path, final_path)
-
+        # ===== 成功 =====
+        job["status"] = "COMPLETED"
+        job["progress"] = 100
         job["audio_url"] = f"/musicdata/{final_name}"
-        job["progress"]  = 100
-        job["status"]    = "COMPLETED"
 
     except Exception as e:
         job["status"] = "FAILED"
-        job["error"]  = str(e)
-
+        job["error"] = f"MusicGPT 异常：{e}"
 
 # ========== 查询/列出 ==========
 def _safe_path(p: Path) -> Path:
@@ -1282,7 +1282,139 @@ async def generate_music_once(prompt: str, duration: int | None = None) -> tuple
     audio_url = f"/musicdata/{final_name}"
     return audio_url, final_path
 
+import numpy as np
+def extract_motion_energy(npy_path: Path, fps: float = 20.0):
+    """
+    从 MotionGPT 输出的 *_out.npy 中提取动作能量曲线与峰值。
+    自动兼容 shape:
+        (F, J, 3)
+        (1, F, J, 3)
+    返回：
+        energy: 平滑后的能量序列（list[float]）
+        peaks:  峰值所在的帧索引（list[int]，对应 energy 的下标）
+    """
+    from scipy.signal import find_peaks
 
+    arr = np.load(npy_path, allow_pickle=True)
+
+    # --- 兼容 batch 维度 (1, F, J, 3) ---
+    if arr.ndim == 4 and arr.shape[0] == 1:
+        arr = arr[0]  # -> (F, J, 3)
+
+    if arr.ndim != 3:
+        raise ValueError(f"Unexpected NPY shape: {arr.shape}, expected (F, J, 3)")
+
+    F, J, C = arr.shape
+    if C != 3:
+        raise ValueError(f"Last dim must be 3 coordinates, got {C}")
+
+    if F < 2:
+        # 帧数太少，无法计算速度
+        return [], []
+
+    # --- 计算逐帧速度与能量 ---
+    # vel: 相邻帧差分后的速度向量模长 (F-1, J)
+    vel = np.linalg.norm(arr[1:] - arr[:-1], axis=2)
+    # energy: 各关节速度的平均，得到单通道能量曲线 (F-1,)
+    energy = vel.mean(axis=1)
+
+    # --- 简单平滑，避免抖动 ---
+    if len(energy) > 3:
+        kernel = np.ones(3, dtype=np.float32) / 3.0
+        energy_smooth = np.convolve(energy, kernel, mode="same")
+    else:
+        energy_smooth = energy
+
+    # --- 寻找能量峰值 ---
+    # 至少间隔 0.25 秒，避免太密集的峰
+    distance = max(1, int(fps * 0.25))
+    std_val = float(np.std(energy_smooth))
+    # prominence 根据能量波动自适应设定，太小会到处是峰，太大又一个都没有
+    prominence = std_val * 0.1 if std_val > 0 else 0.0
+
+    peaks, _ = find_peaks(energy_smooth, distance=distance, prominence=prominence)
+
+    return energy_smooth.tolist(), peaks.tolist()
+
+
+
+def build_rhythm_prompt(text_prompt: str, peaks, energy, fps: float = 20.0):
+    """
+    根据动作能量和峰值，构造 MusicGPT 能理解的节奏提示词。
+
+    text_prompt: 你传给后端的原始文本（“动作描述 + In a ... music ...”）
+    peaks:       extract_motion_energy 返回的峰值帧索引
+    energy:      extract_motion_energy 返回的能量序列
+    fps:         动画帧率，用于换算时间（秒）
+    """
+    peaks = list(peaks or [])
+    energy = list(energy or [])
+
+    # --- 计算整体强度，用于补充说明 ---
+    if len(energy) > 0:
+        avg_energy = float(sum(energy) / len(energy))
+        peak_energy = float(max(energy))
+    else:
+        avg_energy = 0.0
+        peak_energy = 0.0
+
+    if peak_energy <= 0 or avg_energy <= 0:
+        intensity_desc = (
+            "The overall motion intensity is relatively low, so the music can stay more subtle, "
+            "with soft rhythmic pulses and occasional accents that do not dominate the scene."
+        )
+    elif peak_energy > avg_energy * 1.6:
+        intensity_desc = (
+            "The action contains frequent high-energy impacts, so the music should stay fast, "
+            "intense, and rhythmic with strong percussion and clearly defined downbeats."
+        )
+    else:
+        intensity_desc = (
+            "The action has moderate intensity, so the music should maintain a clear beat with "
+            "regular accents, balancing tension and breathing space."
+        )
+
+    # --- 如果没有检测到峰值，就不给具体时间点，只给强度建议 ---
+    if not peaks:
+        return f"""
+Generate background music for a combat animation.
+
+Action description:
+{text_prompt}
+
+Rhythm alignment instructions:
+- Use a clear, steady beat that matches the overall pace of the movement.
+- Emphasize stronger drum hits during visually intense moments of the motion.
+- Keep a coherent tempo suitable for action scenes.
+- Style suggestion: If no specific style was provided, use an epic battle style with percussion accents.
+
+{intensity_desc}
+"""
+    offset_frames = max(1, int(0.5 * fps))
+    adjusted_peaks = [max(0, int(p) - offset_frames) for p in peaks]
+
+    # 转成秒（保留两位小数）
+    peak_times = [round(p / fps, 2) for p in adjusted_peaks]
+    # 最多取前 6 个，避免提示太长
+    peak_times_short = peak_times[:6]
+    peak_str = ", ".join(f"{t}s" for t in peak_times_short)
+
+    return f"""
+Generate background music for a combat animation.
+
+Action description:
+{text_prompt}
+
+Rhythm alignment instructions:
+- Rhythmic hits should occur on the downbeats at {peak_str}.
+- Place **clear percussive hits** (e.g., low drum or impact sounds) exactly at each of: {peak_str}.
+- Treat these times as the main rhythmic anchors, keeping the core beat locked to these impacts.
+- Between these impacts, keep a driving rhythm that smoothly connects one hit to the next.
+- Keep the tempo consistent and suitable for an action / battle scene.
+- Style suggestion: epic orchestral battle music with strong drums and percussion, supporting the sense of momentum.
+
+{intensity_desc}
+"""
 
 # ---- 多模态核心任务：文本 → NPY → MP4 + BVH + 音频 + 合成 MP4 ----
 async def run_combo(job_id: str):

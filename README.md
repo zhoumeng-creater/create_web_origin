@@ -31,7 +31,7 @@ npm run dev
 ## 后端启动方法
 
 ```python
-animation_back.py
+python -m uvicorn animation_back:app --port 8000
 ```
 
 
