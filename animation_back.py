@@ -999,82 +999,82 @@ def music_debug(job_id: str):
 
 # ========== 异步执行器 ==========
 async def _run_music_job(job_id: str, inb: MusicIn):
-    job = MUSIC_JOBS[job_id]
+    """
+    最终稳定版 MusicGPT 异步任务
+    - 只向 MusicGPT 传 .wav 作为 --output
+    - 等待 MusicGPT 自己完成 .part → .wav
+    - 防御性访问 MUSIC_JOBS，避免 KeyError
+    """
+
+    job = MUSIC_JOBS.get(job_id)
+    if not job:
+        # job 可能已被清理或服务重启
+        return
+
     job["status"] = "RUNNING"
-    job["progress"] = 1
-
-    final_name = f"{int(time.time())}.wav"
-    tmp_name   = f".{final_name}.part"
-    tmp_path = AUDIO_PUBLIC_DIR / tmp_name
-    final_path = AUDIO_PUBLIC_DIR / final_name
-
-    cmd = [
-        MUSICGPT_BIN,
-        inb.prompt,
-        "--secs", str(inb.duration),
-        "--no-playback",
-        "--no-interactive",
-        "--output", str(tmp_path),
-    ]
-
-    start_ts = time.time()
+    job["progress"] = 5
 
     try:
+        # ===== 使用已准备好的英文 prompt =====
+        prompt = job["prompt_en"]
+
+        # ===== 音乐时长 =====
+        secs = int(job.get("duration") or DEFAULT_SECS)
+
+        # ===== 只生成最终 wav 名称（非常关键）=====
+        ts = int(time.time())
+        final_name = f"{ts}.wav"
+        final_path = AUDIO_PUBLIC_DIR / final_name
+
+        # ===== 构造 MusicGPT CLI（注意：不传 .wav.part）=====
+        cmd = [
+            str(MUSICGPT_BIN),
+            prompt,
+            "--secs", str(secs),
+            "--no-playback",
+            "--no-interactive",
+            "--output", str(final_path),   # ✅ 只传 .wav
+        ]
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
             env=_music_env(),
             creationflags=_win_high_priority_flags(),
         )
 
-        stdout_buf, stderr_buf = [], []
-        readers = []
-        if proc.stdout:
-            readers.append(asyncio.create_task(_read_stream(proc.stdout, stdout_buf, job)))
-        if proc.stderr:
-            readers.append(asyncio.create_task(_read_stream(proc.stderr, stderr_buf, job)))
+        job["progress"] = 30
 
-        # 进度推进到 90%
-        while True:
-            if time.time() - start_ts > MAX_RUNTIME:
-                with contextlib.suppress(Exception):
-                    proc.kill()
-                job["status"] = "FAILED"
-                job["error"]  = "生成超时"
-                return
-
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=1.0)
-                break
-            except asyncio.TimeoutError:
-                job["progress"] = min(90, job["progress"] + 2)
-
-        await asyncio.gather(*readers, return_exceptions=True)
+        # ===== 等待 MusicGPT 进程结束 =====
+        await proc.communicate()
 
         if proc.returncode != 0:
             job["status"] = "FAILED"
-            job["error"]  = "\n".join(stderr_buf[-30:])
+            job["error"] = "MusicGPT 执行失败（进程返回码非 0）"
             return
 
-        job["progress"] = 95
+        # ===== 等待最终 .wav 文件出现（MusicGPT 内部会处理 .part）=====
+        found = False
+        for _ in range(80):  # 最多等待 8 秒
+            if final_path.exists() and final_path.stat().st_size > 0:
+                found = True
+                break
+            await asyncio.sleep(0.1)
 
-        await asyncio.sleep(0.2)
-        if not tmp_path.exists():
+        if not found:
             job["status"] = "FAILED"
-            job["error"]  = "未找到输出文件"
+            job["error"] = "未检测到生成完成的音频文件"
             return
 
-        os.replace(tmp_path, final_path)
-
+        # ===== 成功 =====
+        job["status"] = "COMPLETED"
+        job["progress"] = 100
         job["audio_url"] = f"/musicdata/{final_name}"
-        job["progress"]  = 100
-        job["status"]    = "COMPLETED"
 
     except Exception as e:
         job["status"] = "FAILED"
-        job["error"]  = str(e)
-
+        job["error"] = f"MusicGPT 异常：{e}"
 
 # ========== 查询/列出 ==========
 def _safe_path(p: Path) -> Path:
