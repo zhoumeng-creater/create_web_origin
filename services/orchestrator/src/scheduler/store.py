@@ -32,12 +32,17 @@ class JobStore:
         job_section = uir_payload.get("job")
         if isinstance(job_section, dict):
             job_section["id"] = job_id
+        hooks = uir_payload.get("hooks")
+        event_stream = False
+        if isinstance(hooks, dict):
+            event_stream = bool(hooks.get("event_stream"))
         uir_digest = stable_hash(uir_payload)
         job = Job(
             job_id=job_id,
             uir=uir_payload,
             uir_hash=uir_digest,
             status=JobStatus.QUEUED,
+            event_stream=event_stream,
         )
         runtime_paths = get_runtime_paths()
         job_dir = ensure_job_dirs(runtime_paths.assets_dir, job_id)
