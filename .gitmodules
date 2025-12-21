@@ -1,0 +1,4 @@
+[submodule "third_party/AnimationGPT"]
+	path = third_party/AnimationGPT
+	url = https://github.com/foranimind/AnimationGPT.git
+	branch = main

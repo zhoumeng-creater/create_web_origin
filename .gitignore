@@ -23,7 +23,7 @@ public/outputs/
 *.dmg
 
 # Model
-AnimationGPT/
+
 
 # Python
 __pycache__/
