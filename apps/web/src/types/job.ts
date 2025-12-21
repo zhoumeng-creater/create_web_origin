@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const queueValueSchema = z.union([z.number(), z.string()]).optional();
+
 export const jobStatusSchema = z.object({
   status: z.string(),
   progress: z.number().optional(),
@@ -7,6 +9,10 @@ export const jobStatusSchema = z.object({
   message: z.string().optional(),
   logs_tail: z.array(z.string()).optional(),
   partial_assets: z.unknown().optional(),
+  queue_position: queueValueSchema,
+  queue_index: queueValueSchema,
+  queue_rank: queueValueSchema,
+  queue: queueValueSchema,
 });
 
 export type JobStatus = z.infer<typeof jobStatusSchema>;
