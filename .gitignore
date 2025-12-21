@@ -134,3 +134,34 @@ Thumbs.db
 package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
+
+# runtime outputs
+runtime/
+**/runtime/
+
+# Node
+**/node_modules/
+**/dist/
+**/.vite/
+
+# Python
+**/__pycache__/
+**/.venv/
+**/.pytest_cache/
+
+# Model weights / large files
+**/*.ckpt
+**/*.pth
+**/*.pt
+**/*.safetensors
+
+# Generated assets
+**/*.wav
+**/*.mp3
+**/*.mp4
+**/*.bvh
+**/*.fbx
+**/*.glb
+
+# Binaries
+**/*.exe
