@@ -22,6 +22,7 @@ def _job_to_dict(job: Any) -> Dict[str, Any]:
         "started_at": job.started_at.isoformat() if job.started_at else None,
         "ended_at": job.ended_at.isoformat() if job.ended_at else None,
         "uir": job.uir,
+        "uir_hash": job.uir_hash,
         "manifest_path": job.manifest_path,
         "manifest_url": job.manifest_url,
         "logs": list(job.logs),
@@ -36,7 +37,10 @@ def _format_sse(event_name: str, data: Dict[str, Any]) -> str:
 
 @router.post("")
 async def create_job(uir: Optional[Dict[str, Any]] = Body(default=None)) -> Dict[str, str]:
-    job = JOB_STORE.create_job(uir or {})
+    try:
+        job = JOB_STORE.create_job(uir or {})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await enqueue_job(job.job_id)
     return {"job_id": job.job_id}
 

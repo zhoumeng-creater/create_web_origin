@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from .models import Job, JobStatus
+from ..uir import uir_hash, validate_uir
 
 _TERMINAL_STATUSES = {JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELED}
 
@@ -21,8 +23,16 @@ class JobStore:
         self._max_log_lines = max_log_lines
 
     def create_job(self, uir: Dict[str, Any]) -> Job:
+        uir_model = validate_uir(uir)
+        uir_payload = json.loads(uir_model.json(by_alias=True, exclude_none=True))
+        uir_digest = uir_hash(uir_model)
         job_id = uuid4().hex
-        job = Job(job_id=job_id, uir=uir, status=JobStatus.QUEUED)
+        job = Job(
+            job_id=job_id,
+            uir=uir_payload,
+            uir_hash=uir_digest,
+            status=JobStatus.QUEUED,
+        )
         with self._lock:
             self._jobs[job_id] = job
         return job

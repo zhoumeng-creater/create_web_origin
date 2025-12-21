@@ -34,6 +34,7 @@ class Job:
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     uir: Dict[str, Any] = field(default_factory=dict)
+    uir_hash: str = ""
     manifest_path: Optional[str] = None
     manifest_url: Optional[str] = None
     logs: List[str] = field(default_factory=list)

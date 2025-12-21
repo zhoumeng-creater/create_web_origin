@@ -1,9 +1,9 @@
-import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict
 
 from ..config.runtime import get_runtime_paths
+from ..uir import uir_hash
 
 
 def ensure_job_dir(job_id: str) -> Path:
@@ -19,19 +19,6 @@ def make_asset_url(job_id: str, filename: str) -> str:
 
 def _manifest_path(job_id: str) -> Path:
     return ensure_job_dir(job_id) / "manifest.json"
-
-
-def _hash_uir(uir: Any) -> str:
-    try:
-        payload = json.dumps(
-            uir,
-            sort_keys=True,
-            ensure_ascii=True,
-            separators=(",", ":"),
-        )
-    except TypeError:
-        payload = json.dumps(str(uir), ensure_ascii=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _deep_merge(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -54,14 +41,24 @@ def write_manifest(job: Any, outputs_dict: Dict[str, Any]) -> Path:
     outputs = existing.get("outputs", {})
     merged_outputs = _deep_merge(outputs, outputs_dict or {})
 
-    inputs = job.uir
-    if isinstance(job.uir, dict) and "inputs" in job.uir:
-        inputs = job.uir.get("inputs")
+    inputs: Any = job.uir
+    if isinstance(job.uir, dict):
+        inputs = {}
+        input_section = job.uir.get("input") or job.uir.get("inputs")
+        if isinstance(input_section, dict):
+            inputs.update(input_section)
+        intent_section = job.uir.get("intent")
+        if isinstance(intent_section, dict):
+            inputs.update(intent_section)
+        if not inputs:
+            inputs = job.uir
+
+    digest = getattr(job, "uir_hash", "") or uir_hash(job.uir)
 
     manifest = {
         "job_id": job.job_id,
         "created_at": job.created_at.isoformat(),
-        "uir_hash": _hash_uir(job.uir),
+        "uir_hash": digest,
         "inputs": inputs,
         "outputs": merged_outputs,
     }
