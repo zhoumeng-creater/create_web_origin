@@ -1,0 +1,193 @@
+.three-preview-player {
+  display: grid;
+  grid-template-rows: minmax(260px, 1fr) auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b1118;
+  color: var(--text);
+  font-family: "Space Grotesk", "IBM Plex Sans", "Segoe UI", sans-serif;
+  box-shadow: 0 16px 35px rgba(5, 10, 20, 0.35);
+  transition: border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease);
+}
+
+.three-preview-canvas {
+  position: relative;
+  min-height: 320px;
+  background: radial-gradient(circle at 30% 20%, #1a2230 0%, #0b1118 60%);
+}
+
+.three-preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  background: rgba(8, 12, 18, 0.72);
+  color: #f8fafc;
+  z-index: 2;
+  animation: ui-fade-in var(--enter) var(--ease) both;
+}
+
+.three-preview-overlay.error {
+  background: rgba(80, 18, 18, 0.85);
+}
+
+.three-preview-overlay-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.three-preview-overlay-message {
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.three-preview-controls {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  background: #0f141c;
+  border-top: 1px solid var(--border);
+}
+
+.three-preview-button {
+  background: #1a2230;
+  color: var(--text);
+  border: 1px solid #2a3544;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: transform var(--enter) var(--ease), background-color var(--enter) var(--ease),
+    border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease);
+}
+
+.three-preview-button:hover {
+  background: #233044;
+  border-color: #394a63;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(5, 10, 20, 0.3);
+}
+
+.three-preview-button:active {
+  transform: translateY(0);
+  transition-duration: var(--exit);
+}
+
+.three-preview-button:focus-visible {
+  outline: 2px solid rgba(154, 176, 255, 0.6);
+  outline-offset: 2px;
+}
+
+.three-preview-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.three-preview-range {
+  width: 100%;
+  cursor: pointer;
+}
+
+.three-preview-time {
+  font-size: 0.8rem;
+  color: #a3adc2;
+}
+
+.three-preview-speed {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: #a3adc2;
+}
+
+.three-preview-speed select {
+  background: #151c26;
+  color: var(--text);
+  border: 1px solid #2a3544;
+  border-radius: 8px;
+  padding: 4px 8px;
+  transition: border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease),
+    background-color var(--enter) var(--ease);
+}
+
+.three-preview-speed select:hover {
+  border-color: #3a4a63;
+}
+
+.three-preview-speed select:focus-visible {
+  outline: none;
+  border-color: rgba(154, 176, 255, 0.7);
+  box-shadow: 0 0 0 2px rgba(93, 114, 186, 0.35);
+}
+
+.preview-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(54, 68, 90, 0.6);
+  background: rgba(15, 20, 30, 0.78);
+  box-shadow: var(--shadow);
+  animation: ui-fade-in var(--enter) var(--ease) both;
+}
+
+@supports ((-webkit-backdrop-filter: blur(8px)) or (backdrop-filter: blur(8px))) {
+  .preview-panel {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+}
+
+.preview-panel-state {
+  border: 1px dashed #2a3544;
+  border-radius: 12px;
+  padding: 16px;
+  background: rgba(15, 20, 30, 0.78);
+  color: var(--text-muted);
+  display: grid;
+  gap: 8px;
+  animation: ui-fade-in var(--enter) var(--ease) both;
+}
+
+.preview-panel-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.preview-panel-message {
+  font-size: 0.9rem;
+}
+
+.preview-panel-state button {
+  justify-self: start;
+  background: #1a2230;
+  color: var(--text);
+  border: 1px solid #2a3544;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: transform var(--enter) var(--ease), background-color var(--enter) var(--ease),
+    border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease);
+}
+
+.preview-panel-state button:hover {
+  background: #233044;
+  border-color: #394a63;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(5, 10, 20, 0.3);
+}
+
+.preview-panel-state button:active {
+  transform: translateY(0);
+  transition-duration: var(--exit);
+}
+
+.preview-panel-state button:focus-visible {
+  outline: 2px solid rgba(154, 176, 255, 0.6);
+  outline-offset: 2px;
+}

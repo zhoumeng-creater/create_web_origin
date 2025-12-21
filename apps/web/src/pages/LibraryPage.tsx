@@ -1,100 +1,270 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { listRecentWorks, onRecentWorksUpdate } from "../lib/storage";
+import { LibraryFilters } from "../components/library/LibraryFilters";
+import { WorkCard } from "../components/library/WorkCard";
+import { useRecentWorks } from "../hooks/useRecentWorks";
+import { fetchManifest } from "../lib/api";
+import { removeWork } from "../lib/storage";
+import type { Manifest } from "../types/manifest";
+import "./pages.css";
+import "../components/library/library.css";
+
+type ManifestEntry =
+  | { status: "loading" }
+  | { status: "ready"; manifest: Manifest }
+  | { status: "error"; error: string };
+
+type WorkSummary = {
+  jobId: string;
+  title: string;
+  prompt?: string;
+  style?: string;
+  duration?: number;
+  status?: string;
+  createdAt?: string;
+  thumbnailUri?: string;
+  loading?: boolean;
+  error?: string;
+};
+
+const durationOptions = [
+  { value: "any", label: "Any duration" },
+  { value: "short", label: "0-10s" },
+  { value: "medium", label: "10-30s" },
+  { value: "long", label: "30s+" },
+];
+
+const dateOptions = [
+  { value: "any", label: "Any date" },
+  { value: "has", label: "Has date" },
+  { value: "none", label: "No date" },
+];
+
+const truncate = (value: string, max = 64) =>
+  value.length > max ? `${value.slice(0, max - 1)}...` : value;
+
+const toErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return "Failed to load manifest.";
+};
+
+const getDuration = (manifest?: Manifest): number | undefined =>
+  manifest?.inputs?.duration_s ??
+  manifest?.outputs?.motion?.duration_s ??
+  manifest?.outputs?.music?.duration_s;
+
+const matchesDuration = (duration: number | undefined, filter: string) => {
+  if (filter === "any") {
+    return true;
+  }
+  if (!Number.isFinite(duration)) {
+    return false;
+  }
+  switch (filter) {
+    case "short":
+      return duration <= 10;
+    case "medium":
+      return duration > 10 && duration <= 30;
+    case "long":
+      return duration > 30;
+    default:
+      return true;
+  }
+};
 
 export const LibraryPage = () => {
-  const [recentWorks, setRecentWorks] = useState(listRecentWorks);
+  const { items } = useRecentWorks();
+  const [manifestMap, setManifestMap] = useState<Record<string, ManifestEntry>>({});
   const [query, setQuery] = useState("");
+  const [styleFilter, setStyleFilter] = useState("all");
+  const [durationFilter, setDurationFilter] = useState("any");
+  const [dateFilter, setDateFilter] = useState("any");
+
+  const updateManifestMap = useCallback(
+    (updater: (prev: Record<string, ManifestEntry>) => Record<string, ManifestEntry>) => {
+      setManifestMap((prev) => updater(prev));
+    },
+    []
+  );
 
   useEffect(() => {
-    setRecentWorks(listRecentWorks());
-    return onRecentWorksUpdate(() => setRecentWorks(listRecentWorks()));
-  }, []);
-
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) {
-      return recentWorks;
-    }
-    return recentWorks.filter((item) => {
-      const title = String(item.meta.title ?? "").toLowerCase();
-      return item.jobId.toLowerCase().includes(needle) || title.includes(needle);
+    let cancelled = false;
+    const currentIds = new Set(items.map((item) => item.jobId));
+    updateManifestMap((prev) => {
+      const next: Record<string, ManifestEntry> = {};
+      let changed = false;
+      for (const [jobId, entry] of Object.entries(prev)) {
+        if (currentIds.has(jobId)) {
+          next[jobId] = entry;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
-  }, [query, recentWorks]);
+
+    items.forEach((item) => {
+      const entry = manifestMap[item.jobId];
+      if (entry) {
+        return;
+      }
+      updateManifestMap((prev) => ({
+        ...prev,
+        [item.jobId]: { status: "loading" },
+      }));
+      fetchManifest(item.jobId)
+        .then((manifest) => {
+          if (cancelled) {
+            return;
+          }
+          updateManifestMap((prev) => ({
+            ...prev,
+            [item.jobId]: { status: "ready", manifest },
+          }));
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
+          updateManifestMap((prev) => ({
+            ...prev,
+            [item.jobId]: { status: "error", error: toErrorMessage(error) },
+          }));
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [items, manifestMap, updateManifestMap]);
+
+  const works = useMemo<WorkSummary[]>(() => {
+    return items.map((item) => {
+      const entry = manifestMap[item.jobId];
+      const manifest = entry && entry.status === "ready" ? entry.manifest : undefined;
+      const prompt = manifest?.inputs?.raw_prompt;
+      const title = prompt ? truncate(prompt) : `Work ${item.jobId}`;
+      return {
+        jobId: item.jobId,
+        title,
+        prompt,
+        style: manifest?.inputs?.style,
+        duration: getDuration(manifest),
+        status: manifest?.status,
+        createdAt: manifest?.created_at ?? item.meta.createdAt,
+        thumbnailUri: manifest?.outputs?.scene?.panorama?.uri,
+        loading: entry?.status === "loading",
+        error: entry?.status === "error" ? entry.error : undefined,
+      };
+    });
+  }, [items, manifestMap]);
+
+  const styleOptions = useMemo(() => {
+    const styles = new Set<string>();
+    let hasUnknown = false;
+    works.forEach((work) => {
+      if (work.style) {
+        styles.add(work.style);
+      } else {
+        hasUnknown = true;
+      }
+    });
+    const options = [{ value: "all", label: "All styles" }];
+    Array.from(styles)
+      .sort((a, b) => a.localeCompare(b))
+      .forEach((style) => options.push({ value: style, label: style }));
+    if (hasUnknown) {
+      options.push({ value: "unknown", label: "Unknown" });
+    }
+    return options;
+  }, [works]);
+
+  const filteredWorks = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return works.filter((work) => {
+      if (normalizedQuery) {
+        const haystack = `${work.title} ${work.prompt ?? ""}`.toLowerCase();
+        if (!haystack.includes(normalizedQuery)) {
+          return false;
+        }
+      }
+      if (styleFilter !== "all") {
+        if (styleFilter === "unknown") {
+          if (work.style) {
+            return false;
+          }
+        } else if (work.style !== styleFilter) {
+          return false;
+        }
+      }
+      if (!matchesDuration(work.duration, durationFilter)) {
+        return false;
+      }
+      if (dateFilter === "has" && !work.createdAt) {
+        return false;
+      }
+      if (dateFilter === "none" && work.createdAt) {
+        return false;
+      }
+      return true;
+    });
+  }, [works, query, styleFilter, durationFilter, dateFilter]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <header style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <h1 style={{ margin: 0, fontSize: 28, color: "#111827" }}>Library</h1>
-        <p style={{ margin: 0, color: "#6b7280" }}>Browse your generated works.</p>
+    <div className="page library-page">
+      <header className="page-header library-header">
+        <div>
+          <h1 className="page-title">Library</h1>
+          <p className="page-subtitle">Browse recent works saved locally.</p>
+        </div>
+        <div className="library-count">
+          {filteredWorks.length} of {works.length} works
+        </div>
       </header>
-
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 12,
-          alignItems: "center",
+      <LibraryFilters
+        query={query}
+        style={styleFilter}
+        duration={durationFilter}
+        date={dateFilter}
+        styleOptions={styleOptions}
+        durationOptions={durationOptions}
+        dateOptions={dateOptions}
+        onQueryChange={setQuery}
+        onStyleChange={setStyleFilter}
+        onDurationChange={setDurationFilter}
+        onDateChange={setDateFilter}
+        onClear={() => {
+          setQuery("");
+          setStyleFilter("all");
+          setDurationFilter("any");
+          setDateFilter("any");
         }}
-      >
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search by title or job id"
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid #e5e7eb",
-            minWidth: 240,
-          }}
-        />
-        <select
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid #e5e7eb",
-          }}
-        >
-          <option value="all">All types</option>
-          <option value="scene">Scene</option>
-          <option value="motion">Motion</option>
-          <option value="music">Music</option>
-        </select>
-      </div>
-
-      {filtered.length === 0 ? (
-        <div style={{ color: "#9ca3af" }}>No works yet. Generate one on Create.</div>
+      />
+      {filteredWorks.length === 0 ? (
+        <div className="library-empty">
+          No works match the current filters. Create a new job to populate this list.
+        </div>
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 16,
-          }}
-        >
-          {filtered.map((item) => (
-            <Link
-              key={item.jobId}
-              to={`/works/${item.jobId}`}
-              style={{
-                textDecoration: "none",
-                color: "#111827",
-                border: "1px solid #e5e7eb",
-                borderRadius: 12,
-                padding: 16,
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                background: "#ffffff",
-              }}
-            >
-              <div style={{ fontWeight: 600 }}>{item.meta.title ?? "Untitled work"}</div>
-              <div style={{ fontSize: 12, color: "#6b7280" }}>{item.jobId}</div>
-              <div style={{ fontSize: 12, color: "#9ca3af" }}>
-                Updated {new Date(item.updatedAt).toLocaleString()}
-              </div>
-            </Link>
+        <div className="library-grid">
+          {filteredWorks.map((work) => (
+            <WorkCard
+              key={work.jobId}
+              jobId={work.jobId}
+              title={work.title}
+              prompt={work.prompt}
+              thumbnailUri={work.thumbnailUri}
+              style={work.style}
+              duration={work.duration}
+              status={work.status}
+              createdAt={work.createdAt}
+              loading={work.loading}
+              error={work.error}
+              onRemove={removeWork}
+            />
           ))}
         </div>
       )}

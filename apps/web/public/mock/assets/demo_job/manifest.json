@@ -1,0 +1,43 @@
+{
+  "job_id": "demo_job",
+  "status": "DONE",
+  "created_at": "2024-01-01T00:00:00Z",
+  "inputs": {
+    "raw_prompt": "Demo prompt for mock assets",
+    "style": "demo",
+    "duration_s": 2
+  },
+  "outputs": {
+    "scene": {
+      "panorama": {
+        "uri": "/assets/demo_job/scene/panorama.png",
+        "mime": "image/png"
+      }
+    },
+    "motion": {
+      "bvh": {
+        "uri": "/assets/demo_job/motion/motion.bvh",
+        "mime": "application/octet-stream"
+      },
+      "fps": 30,
+      "duration_s": 2
+    },
+    "music": {
+      "wav": {
+        "uri": "/assets/demo_job/music/music.wav",
+        "mime": "audio/wav"
+      },
+      "duration_s": 2
+    },
+    "preview": {
+      "config": {
+        "uri": "/assets/demo_job/preview/preview_config.json",
+        "mime": "application/json"
+      }
+    },
+    "export": {
+      "mp4": null,
+      "zip": null
+    }
+  }
+}
