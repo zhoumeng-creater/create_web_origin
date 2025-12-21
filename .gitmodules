@@ -2,3 +2,7 @@
 	path = third_party/AnimationGPT
 	url = https://github.com/foranimind/AnimationGPT.git
 	branch = main
+[submodule "third_party/SD-T2I-360PanoImage"]
+	path = third_party/SD-T2I-360PanoImage
+	url = https://github.com/foranimind/SD-T2I-360PanoImage.git
+	branch = main
