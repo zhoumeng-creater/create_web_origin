@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 from .events import EVENT_BUS
 from .models import JobStatus
 from .reporter import ProgressReporter
 from .store import JobStore
+from ..config.runtime import get_runtime_paths
+from ..storage.job_fs import ensure_job_dirs
 from ..storage.manifest import make_asset_url, write_manifest
 
 JOB_QUEUE: asyncio.Queue[str] = asyncio.Queue()
@@ -115,57 +117,83 @@ def _update_manifest_for_stage(store: JobStore, job_id: str, stage: JobStatus) -
     job = store.get_job(job_id)
     if not job:
         return
-    outputs = _stage_outputs(job_id, stage)
-    assets = job.assets or {}
-    if outputs:
-        assets = _deep_merge(assets, outputs)
+    artifacts: List[Dict[str, Any]] = []
+    if isinstance(job.assets, dict):
+        stored = job.assets.get("artifacts")
+        if isinstance(stored, list):
+            artifacts = list(stored)
+    new_artifacts = _stage_artifacts(job_id, stage)
+    if new_artifacts:
+        artifacts.extend(new_artifacts)
+        assets = dict(job.assets) if isinstance(job.assets, dict) else {}
+        assets["artifacts"] = artifacts
         store.update_job(job_id, assets=assets)
         job = store.get_job(job_id)
         if not job:
             return
-    manifest_path = write_manifest(job, assets)
+    runtime_paths = get_runtime_paths()
+    job_dir = ensure_job_dirs(runtime_paths.assets_dir, job_id)
+    write_manifest(job_dir, job.uir, job.status.value, artifacts, [])
     store.update_job(
         job_id,
-        manifest_path=str(manifest_path),
+        manifest_path=str(job_dir / "manifest.json"),
         manifest_url=make_asset_url(job_id, "manifest.json"),
     )
 
 
-def _stage_outputs(job_id: str, stage: JobStatus) -> Dict[str, Any]:
+def _stage_artifacts(job_id: str, stage: JobStatus) -> List[Dict[str, Any]]:
     if stage == JobStatus.RUNNING_SCENE:
-        return {
-            "scene": {
-                "panorama_png": make_asset_url(job_id, "scene.png"),
-            }
-        }
+        return [
+            _asset_ref(
+                job_id,
+                "scene_panorama",
+                "scene/panorama.png",
+                "image/png",
+            )
+        ]
     if stage == JobStatus.RUNNING_MOTION:
-        return {
-            "motion": {
-                "bvh": make_asset_url(job_id, "motion.bvh"),
-                "fps": 30,
-            }
-        }
+        return [
+            _asset_ref(
+                job_id,
+                "motion_bvh",
+                "motion/motion.bvh",
+                "text/plain",
+            )
+        ]
     if stage == JobStatus.RUNNING_MUSIC:
-        return {
-            "music": {
-                "wav": make_asset_url(job_id, "music.wav"),
-                "secs": 12,
-            }
-        }
+        return [
+            _asset_ref(
+                job_id,
+                "music_wav",
+                "music/music.wav",
+                "audio/wav",
+            )
+        ]
+    if stage == JobStatus.COMPOSING_PREVIEW:
+        return [
+            _asset_ref(
+                job_id,
+                "preview_config",
+                "preview/preview_config.json",
+                "application/json",
+            )
+        ]
     if stage == JobStatus.EXPORTING_VIDEO:
-        return {
-            "video": {
-                "mp4": make_asset_url(job_id, "final.mp4"),
-            }
-        }
-    return {}
+        return [
+            _asset_ref(
+                job_id,
+                "export_mp4",
+                "export/final.mp4",
+                "video/mp4",
+            )
+        ]
+    return []
 
 
-def _deep_merge(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
-    merged = dict(base)
-    for key, value in updates.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], value)
-        elif key not in merged:
-            merged[key] = value
-    return merged
+def _asset_ref(job_id: str, role: str, rel_path: str, mime: str) -> Dict[str, Any]:
+    return {
+        "id": f"{job_id}:{role}",
+        "role": role,
+        "uri": make_asset_url(job_id, rel_path),
+        "mime": mime,
+    }

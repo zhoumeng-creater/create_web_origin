@@ -7,6 +7,9 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from .models import Job, JobStatus
+from ..config.runtime import get_runtime_paths
+from ..storage.job_fs import ensure_job_dirs, write_uir
+from ..storage.manifest import make_asset_url, write_manifest
 from ..uir import parse_uir, stable_hash
 
 _TERMINAL_STATUSES = {JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELED}
@@ -25,14 +28,23 @@ class JobStore:
     def create_job(self, uir: Dict[str, Any]) -> Job:
         uir_model = parse_uir(uir)
         uir_payload = json.loads(uir_model.json(by_alias=True, exclude_none=True))
-        uir_digest = stable_hash(uir_model)
         job_id = uuid4().hex
+        job_section = uir_payload.get("job")
+        if isinstance(job_section, dict):
+            job_section["id"] = job_id
+        uir_digest = stable_hash(uir_payload)
         job = Job(
             job_id=job_id,
             uir=uir_payload,
             uir_hash=uir_digest,
             status=JobStatus.QUEUED,
         )
+        runtime_paths = get_runtime_paths()
+        job_dir = ensure_job_dirs(runtime_paths.assets_dir, job_id)
+        write_uir(job_dir, uir_payload)
+        write_manifest(job_dir, uir_payload, job.status.value, [], [])
+        job.manifest_path = str(job_dir / "manifest.json")
+        job.manifest_url = make_asset_url(job_id, "manifest.json")
         with self._lock:
             self._jobs[job_id] = job
         return job
