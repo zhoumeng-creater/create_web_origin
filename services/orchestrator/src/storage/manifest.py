@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from ..config.runtime import get_runtime_paths
-from ..uir import uir_hash
+from ..uir import stable_hash
 
 
 def ensure_job_dir(job_id: str) -> Path:
@@ -53,7 +53,7 @@ def write_manifest(job: Any, outputs_dict: Dict[str, Any]) -> Path:
         if not inputs:
             inputs = job.uir
 
-    digest = getattr(job, "uir_hash", "") or uir_hash(job.uir)
+    digest = getattr(job, "uir_hash", "") or stable_hash(job.uir)
 
     manifest = {
         "job_id": job.job_id,

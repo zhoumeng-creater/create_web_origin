@@ -1,153 +1,218 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Literal
 
 try:
     from pydantic.v1 import (
         BaseModel,
         Field,
-        ValidationError,
         conint,
         conlist,
         confloat,
         constr,
+        root_validator,
+        validator,
     )
 except ImportError:  # pragma: no cover - pydantic v1 fallback
     from pydantic import (
         BaseModel,
         Field,
-        ValidationError,
         conint,
         conlist,
         confloat,
         constr,
+        root_validator,
+        validator,
     )
 
-Targets = conlist(
-    Literal["scene", "motion", "music"],
-    min_items=1,
-    unique_items=True,
-)
+Targets = conlist(constr(min_length=1), min_items=1, unique_items=True)
 Resolution = conlist(conint(ge=1), min_items=2, max_items=2)
+ExportResolution = conlist(conint(ge=1), min_items=2, max_items=2)
+
+KNOWN_MODULES: Tuple[str, ...] = (
+    "scene",
+    "motion",
+    "music",
+    "character",
+    "preview",
+    "export",
+)
 
 
 class UIRBase(BaseModel):
     class Config:
-        extra = "forbid"
+        extra = "allow"
         allow_population_by_field_name = True
 
 
-class Project(UIRBase):
-    title: constr(min_length=1)
+class AssetRef(UIRBase):
+    id: constr(min_length=1)
+    role: constr(min_length=1)
+    mime: constr(min_length=1)
+    uri: constr(min_length=1)
+    sha256: Optional[constr(min_length=1)] = None
+    bytes: Optional[conint(ge=0)] = None
+    meta: Optional[Dict[str, Any]] = None
+
+
+class Job(UIRBase):
+    id: constr(min_length=1)
     created_at: datetime
+    title: Optional[constr(min_length=1)] = None
+    client: Optional[Dict[str, Any]] = None
+    tags: Optional[List[constr(min_length=1)]] = None
+    parent_job_id: Optional[constr(min_length=1)] = None
 
 
 class Input(UIRBase):
     raw_prompt: constr(min_length=1)
-    lang: constr(min_length=2)
+    lang: Optional[constr(min_length=2)] = None
+    references: Optional[List[AssetRef]] = None
+    ui_choices: Optional[Dict[str, Any]] = None
 
 
 class Intent(UIRBase):
+    targets: Targets
     duration_s: confloat(ge=1) = 12
-    style: constr(min_length=1)
-    mood: constr(min_length=1)
-    targets: Targets = Field(default_factory=lambda: ["scene", "motion", "music"])
+    style: Optional[constr(min_length=1)] = None
+    mood: Optional[constr(min_length=1)] = None
+    storybeat: Optional[constr(min_length=1)] = None
+    language_policy: Optional[Dict[str, Any]] = None
+
+
+class RoutingItem(UIRBase):
+    provider: Optional[constr(min_length=1)] = None
+
+
+class Routing(UIRBase):
+    scene: Optional[RoutingItem] = None
+    motion: Optional[RoutingItem] = None
+    music: Optional[RoutingItem] = None
+    character: Optional[RoutingItem] = None
+    preview: Optional[RoutingItem] = None
+    export: Optional[RoutingItem] = None
 
 
 class Scene(UIRBase):
-    provider: constr(min_length=1) = "diffusion360"
-    prompt: constr(min_length=1)
-    negative: Optional[str] = None
-    resolution: Resolution
+    enabled: bool = False
+    prompt: Optional[constr(min_length=1)] = None
+    negative_prompt: Optional[str] = None
+    resolution: Resolution = Field(default_factory=lambda: [2048, 1024])
     seed: Optional[conint(ge=0)] = None
     steps: Optional[conint(ge=1)] = None
-    cfg: Optional[confloat(ge=0)] = None
+    cfg_scale: Optional[confloat(ge=0)] = None
+    upscale: Optional[bool] = None
+    output: Optional[Dict[str, Any]] = None
+
+    @validator("resolution")
+    def _validate_resolution(cls, value: List[int]) -> List[int]:
+        if value[0] != value[1] * 2:
+            raise ValueError("resolution width must be 2x height")
+        return value
 
 
 class Motion(UIRBase):
-    provider: constr(min_length=1) = "animationgpt"
-    prompt: constr(min_length=1)
-    fps: conint(ge=1) = 30
-    length_s: confloat(ge=1)
-    seed: Optional[conint(ge=0)] = None
+    enabled: bool = False
+    prompt: Optional[constr(min_length=1)] = None
+    duration_s: Optional[confloat(ge=1)] = None
+    fps: conint(ge=15, le=60) = 30
+    style: Optional[constr(min_length=1)] = None
+    action_params: Optional[Dict[str, Any]] = None
+    postprocess: Optional[Dict[str, Any]] = None
 
 
 class Music(UIRBase):
-    provider: constr(min_length=1) = "musicgpt"
-    prompt: constr(min_length=1)
-    secs: confloat(ge=1)
-    bpm: Optional[confloat(ge=1)] = None
-    seed: Optional[conint(ge=0)] = None
+    enabled: bool = False
+    prompt: Optional[constr(min_length=1)] = None
+    duration_s: Optional[confloat(ge=1)] = None
+    tempo_bpm: Optional[confloat(ge=1)] = None
+    genre: Optional[constr(min_length=1)] = None
+    output: Optional[Dict[str, Any]] = None
 
 
-class Output(UIRBase):
-    need_preview: bool
-    need_export_video: bool
-    export_preset: constr(min_length=1)
+class Character(UIRBase):
+    enabled: bool = False
+    character_id: Optional[constr(min_length=1)] = None
+    style: Optional[constr(min_length=1)] = None
+    retarget: Optional[Dict[str, Any]] = None
+
+
+class Preview(UIRBase):
+    enabled: bool = False
+    camera_preset: Optional[constr(min_length=1)] = None
+    autoplay: Optional[bool] = None
+    timeline: Optional[Dict[str, Any]] = None
+
+
+class Export(UIRBase):
+    enabled: bool = False
+    format: Optional[constr(min_length=1)] = None
+    resolution: Optional[ExportResolution] = None
+    fps: Optional[conint(ge=1)] = None
+    bitrate: Optional[constr(min_length=1)] = None
+    include: Optional[List[constr(min_length=1)]] = None
+
+
+class Modules(UIRBase):
+    scene: Scene = Field(default_factory=Scene)
+    motion: Motion = Field(default_factory=Motion)
+    music: Music = Field(default_factory=Music)
+    character: Character = Field(default_factory=Character)
+    preview: Preview = Field(default_factory=Preview)
+    export: Export = Field(default_factory=Export)
+
+    def enabled_targets(self) -> Set[str]:
+        enabled: Set[str] = set()
+        for name in KNOWN_MODULES:
+            module = getattr(self, name, None)
+            if module and getattr(module, "enabled", False):
+                enabled.add(name)
+        return enabled
+
+
+class Constraints(UIRBase):
+    max_runtime_s: Optional[confloat(ge=1)] = None
+    quality: Optional[constr(min_length=1)] = None
+    safety: Optional[Dict[str, Any]] = None
+
+
+class Runtime(UIRBase):
+    priority: Optional[conint(ge=0, le=10)] = None
+    concurrency_key: Optional[constr(min_length=1)] = None
+    locks: Optional[Dict[str, Any]] = None
+    fallback: Optional[Dict[str, Any]] = None
+    cache_policy: Optional[Dict[str, Any]] = None
+
+
+class Hooks(UIRBase):
+    event_stream: Optional[bool] = None
 
 
 class UIR(UIRBase):
-    project: Project
+    uir_version: Literal["1.0"]
+    job: Job
     input_: Input = Field(..., alias="input")
     intent: Intent
-    scene: Scene
-    motion: Motion
-    music: Music
-    output: Output
+    routing: Optional[Routing] = None
+    modules: Modules
+    constraints: Optional[Constraints] = None
+    runtime: Optional[Runtime] = None
+    hooks: Optional[Hooks] = None
 
-
-def validate_uir(uir_dict: Dict[str, Any]) -> UIR:
-    try:
-        return UIR.parse_obj(uir_dict)
-    except ValidationError as exc:
-        raise ValueError(_format_validation_error(exc)) from exc
-
-
-def uir_hash(uir_dict: Union[UIR, Dict[str, Any]]) -> str:
-    model = uir_dict if isinstance(uir_dict, UIR) else validate_uir(uir_dict)
-    canonical = _canonical_dict(model)
-    payload = json.dumps(
-        canonical,
-        sort_keys=True,
-        ensure_ascii=True,
-        separators=(",", ":"),
-    )
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
-
-
-def _canonical_dict(model: UIR) -> Dict[str, Any]:
-    data = json.loads(model.json(by_alias=True, exclude_none=True))
-    return _strip_keys(data, {"created_at"})
-
-
-def _strip_keys(value: Any, drop_keys: Set[str]) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _strip_keys(item, drop_keys)
-            for key, item in value.items()
-            if key not in drop_keys
-        }
-    if isinstance(value, list):
-        return [_strip_keys(item, drop_keys) for item in value]
-    return value
-
-
-def _format_validation_error(error: ValidationError) -> str:
-    parts: List[str] = []
-    for entry in error.errors():
-        loc = ".".join(_normalize_loc(entry.get("loc", ())))
-        msg = entry.get("msg", "invalid value")
-        parts.append(f"{loc}: {msg}")
-    return "UIR validation failed: " + "; ".join(parts)
-
-
-def _normalize_loc(loc: Tuple[Any, ...]) -> List[str]:
-    normalized: List[str] = []
-    for part in loc:
-        name = "input" if part == "input_" else str(part)
-        normalized.append(name)
-    return normalized
+    @root_validator(skip_on_failure=True)
+    def _apply_duration_defaults(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        intent = values.get("intent")
+        modules = values.get("modules")
+        if not intent or not modules:
+            return values
+        duration = getattr(intent, "duration_s", None)
+        if duration is None:
+            return values
+        motion = getattr(modules, "motion", None)
+        if motion is not None and motion.duration_s is None and motion.enabled:
+            motion.duration_s = duration
+        music = getattr(modules, "music", None)
+        if music is not None and music.duration_s is None and music.enabled:
+            music.duration_s = duration
+        return values
