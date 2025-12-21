@@ -9,11 +9,11 @@ from typing import Any, Dict, List, Optional
 class JobStatus(str, Enum):
     QUEUED = "QUEUED"
     PLANNING = "PLANNING"
-    RUNNING_MOTION = "RUNNING_MOTION"
     RUNNING_SCENE = "RUNNING_SCENE"
+    RUNNING_MOTION = "RUNNING_MOTION"
     RUNNING_MUSIC = "RUNNING_MUSIC"
-    COMPOSING_PREVIEW = "COMPOSING_PREVIEW"
-    EXPORTING_VIDEO = "EXPORTING_VIDEO"
+    BUILDING_PREVIEW = "BUILDING_PREVIEW"
+    EXPORTING = "EXPORTING"
     DONE = "DONE"
     FAILED = "FAILED"
     CANCELED = "CANCELED"
@@ -39,6 +39,9 @@ class Job:
     manifest_url: Optional[str] = None
     logs: List[str] = field(default_factory=list)
     assets: Dict[str, Any] = field(default_factory=dict)
+    queue_position: Optional[int] = None
+    queue_size: Optional[int] = None
+    event_stream: bool = False
 
     def __post_init__(self) -> None:
         if not self.stage:
