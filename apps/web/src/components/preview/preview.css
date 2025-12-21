@@ -1,0 +1,131 @@
+.three-preview-player {
+  display: grid;
+  grid-template-rows: minmax(260px, 1fr) auto;
+  border: 1px solid #1f2733;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b1118;
+  color: #e5e7eb;
+  font-family: "Space Grotesk", "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.three-preview-canvas {
+  position: relative;
+  min-height: 320px;
+  background: radial-gradient(circle at 30% 20%, #1a2230 0%, #0b1118 60%);
+}
+
+.three-preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  background: rgba(8, 12, 18, 0.72);
+  color: #f8fafc;
+  z-index: 2;
+}
+
+.three-preview-overlay.error {
+  background: rgba(80, 18, 18, 0.85);
+}
+
+.three-preview-overlay-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.three-preview-overlay-message {
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.three-preview-controls {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  background: #0f141c;
+  border-top: 1px solid #1f2733;
+}
+
+.three-preview-button {
+  background: #1a2230;
+  color: #e5e7eb;
+  border: 1px solid #2a3544;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.three-preview-button:hover {
+  background: #233044;
+}
+
+.three-preview-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.three-preview-range {
+  width: 100%;
+  cursor: pointer;
+}
+
+.three-preview-time {
+  font-size: 0.8rem;
+  color: #a3adc2;
+}
+
+.three-preview-speed {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: #a3adc2;
+}
+
+.three-preview-speed select {
+  background: #151c26;
+  color: #e5e7eb;
+  border: 1px solid #2a3544;
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.preview-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.preview-panel-state {
+  border: 1px dashed #2a3544;
+  border-radius: 12px;
+  padding: 16px;
+  background: #0f141c;
+  color: #9aa4b2;
+  display: grid;
+  gap: 8px;
+}
+
+.preview-panel-title {
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+.preview-panel-message {
+  font-size: 0.9rem;
+}
+
+.preview-panel-state button {
+  justify-self: start;
+  background: #1a2230;
+  color: #e5e7eb;
+  border: 1px solid #2a3544;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}

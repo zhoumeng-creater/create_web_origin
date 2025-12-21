@@ -1,0 +1,94 @@
+.page {
+  min-height: 100vh;
+  padding: 24px;
+  background: #0a0e14;
+  color: #e5e7eb;
+  display: grid;
+  gap: 16px;
+  font-family: "Space Grotesk", "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.page-header {
+  display: grid;
+  gap: 6px;
+}
+
+.page-title {
+  font-size: 1.6rem;
+  margin: 0;
+}
+
+.page-subtitle {
+  margin: 0;
+  color: #9aa4b2;
+}
+
+.step-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step-button {
+  background: #151c26;
+  color: #cbd5f5;
+  border: 1px solid #263244;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.step-button.active {
+  background: #1f2b3f;
+  color: #f8fafc;
+  border-color: #3a4a63;
+}
+
+.step-content {
+  display: grid;
+  gap: 16px;
+}
+
+.step-placeholder {
+  border: 1px dashed #263244;
+  border-radius: 12px;
+  padding: 16px;
+  color: #94a3b8;
+  background: #0f141c;
+}
+
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.field-label {
+  font-size: 0.9rem;
+  color: #cbd5f5;
+}
+
+.field-input {
+  min-width: 220px;
+  flex: 1 1 220px;
+  background: #0f141c;
+  border: 1px solid #263244;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #e5e7eb;
+}
+
+.field-button {
+  background: #1f2b3f;
+  color: #e5e7eb;
+  border: 1px solid #32415a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.section-title {
+  font-size: 1.1rem;
+  margin: 0;
+}
