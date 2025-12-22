@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
-try:
-    from pydantic.v1 import ValidationError
-except ImportError:  # pragma: no cover - pydantic v1 fallback
+if TYPE_CHECKING:
     from pydantic import ValidationError
+else:
+    try:
+        from pydantic.v1 import ValidationError
+    except ImportError:  # pragma: no cover - pydantic v1 fallback
+        from pydantic import ValidationError
 
 from .models import KNOWN_MODULES, UIR
 

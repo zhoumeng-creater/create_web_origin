@@ -1,0 +1,17 @@
+# Core API + orchestration
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.23,<1.0
+pydantic>=2.0,<3.0
+
+# General utilities used by animation_back.py
+python-dotenv>=1.0,<2.0
+httpx>=0.24,<1.0
+openai>=1.0,<2.0
+PyYAML>=6.0,<7.0
+numpy>=1.23,<2.0
+scipy>=1.10,<2.0
+
+# AnimationGPT conversion helpers (npy2bvh)
+matplotlib>=3.6,<4.0
+# torch>=1.13,<3.0
+tqdm>=4.66,<5.0

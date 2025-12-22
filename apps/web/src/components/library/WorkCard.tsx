@@ -17,7 +17,7 @@ type WorkCardProps = {
 };
 
 const formatDuration = (value?: number) => {
-  if (!Number.isFinite(value)) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     return "--";
   }
   const rounded = Math.round(value * 10) / 10;
