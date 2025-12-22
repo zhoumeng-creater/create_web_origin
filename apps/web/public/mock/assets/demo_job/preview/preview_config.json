@@ -1,0 +1,19 @@
+{
+  "scene": {
+    "panorama_uri": "/assets/demo_job/scene/panorama.png"
+  },
+  "motion": {
+    "bvh_uri": "/assets/demo_job/motion/motion.bvh",
+    "fps": 30
+  },
+  "music": {
+    "wav_uri": "/assets/demo_job/music/music.wav"
+  },
+  "camera": {
+    "preset": "orbit",
+    "auto_rotate": true
+  },
+  "timeline": {
+    "duration_s": 2
+  }
+}
