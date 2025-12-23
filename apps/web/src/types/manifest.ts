@@ -118,6 +118,14 @@ const toNumber = (value: unknown): number | undefined => {
 const getPath = (source: unknown, path: string[]): unknown => {
   let current: unknown = source;
   for (const key of path) {
+    if (Array.isArray(current)) {
+      const index = Number(key);
+      if (!Number.isInteger(index)) {
+        return undefined;
+      }
+      current = current[index];
+      continue;
+    }
     if (!isRecord(current)) {
       return undefined;
     }
@@ -178,9 +186,15 @@ const normalizeOutputs = (source: Record<string, unknown>): Manifest["outputs"] 
       ["outputs", "scene", "panorama_png"],
       ["outputs", "scene", "panorama_uri"],
       ["outputs", "scene", "panorama_url"],
+      ["outputs", "panorama_png"],
+      ["outputs", "panorama_url"],
+      ["panorama_png"],
+      ["panorama_url"],
+      ["panorama_uri"],
       ["outputs", "scene_panorama"],
       ["scene", "panorama"],
       ["scene", "panorama_png"],
+      ["scene", "panorama_url"],
       ["scene_panorama"],
     ])
   );
@@ -194,7 +208,13 @@ const normalizeOutputs = (source: Record<string, unknown>): Manifest["outputs"] 
       ["outputs", "motion", "bvh_uri"],
       ["outputs", "motion", "bvh_url"],
       ["outputs", "motion", "bvh_path"],
+      ["outputs", "bvh_download_url"],
       ["outputs", "motion_bvh"],
+      ["bvh_download_url"],
+      ["download_url"],
+      ["bvh_url"],
+      ["bvh_uri"],
+      ["bvh"],
       ["motion", "bvh"],
       ["motion", "bvh_uri"],
       ["motion_bvh"],
@@ -230,7 +250,12 @@ const normalizeOutputs = (source: Record<string, unknown>): Manifest["outputs"] 
       ["outputs", "music", "wav_uri"],
       ["outputs", "music", "wav_url"],
       ["outputs", "music", "wav_path"],
+      ["outputs", "audio_url"],
       ["outputs", "music_wav"],
+      ["audio_url"],
+      ["wav_url"],
+      ["wav_uri"],
+      ["wav"],
       ["music", "wav"],
       ["music", "wav_uri"],
       ["music_wav"],
@@ -270,12 +295,22 @@ const normalizeOutputs = (source: Record<string, unknown>): Manifest["outputs"] 
   const rawExportMp4 = getAny(source, [
     ["outputs", "export", "mp4"],
     ["outputs", "export_mp4"],
+    ["outputs", "preview_url"],
+    ["outputs", "mp4_url"],
+    ["outputs", "mp4_list", "0"],
+    ["preview_url"],
+    ["mp4_url"],
+    ["mp4_list", "0"],
     ["export", "mp4"],
     ["export_mp4"],
   ]);
   const rawExportZip = getAny(source, [
     ["outputs", "export", "zip"],
     ["outputs", "export_zip"],
+    ["outputs", "zip_url"],
+    ["outputs", "bundle_url"],
+    ["zip_url"],
+    ["bundle_url"],
     ["export", "zip"],
     ["export_zip"],
   ]);

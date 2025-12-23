@@ -6,6 +6,12 @@ export const jobStatusSchema = z.object({
   stage: z.string().optional(),
   message: z.string().optional(),
   logs_tail: z.array(z.string()).optional(),
+  preview_url: z.string().optional(),
+  audio_url: z.string().optional(),
+  bvh_download_url: z.string().optional(),
+  download_url: z.string().optional(),
+  mp4_list: z.array(z.string()).optional(),
+  zip_url: z.string().optional(),
   partial_assets: z.unknown().optional(),
 });
 

@@ -1,6 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 
+import { PreviewPanel } from "../components/preview/PreviewPanel";
+import { useJobRunner } from "../hooks/useJobRunner";
+import { fetchManifest, fetchPreviewConfig, getAssetUrl } from "../lib/api";
+import type { Manifest } from "../types/manifest";
+import type { PreviewConfig } from "../types/previewConfig";
 import "./pages.css";
 
 type MessageRole = "user" | "system" | "tool" | "result";
@@ -61,15 +66,6 @@ const INSPECTOR_STEPS = [
   { id: "review", label: "交付" },
 ];
 
-const MOCK_LOGS = [
-  "任务已进入队列，正在分配渲染资源。",
-  "解析提示词并拆解镜头节奏。",
-  "生成运动骨骼与镜头路径。",
-  "渲染关键帧与环境层。",
-  "混合环境音与氛围配乐。",
-  "整理预览与可导出素材。",
-];
-
 const INSPECTOR_TABS = [
   { id: "preview", label: "Preview" },
   { id: "assets", label: "Assets" },
@@ -108,6 +104,13 @@ export const CreatePage = () => {
     detailBoost: false,
   });
   const [activeTab, setActiveTab] = useState<InspectorTab>("preview");
+  const [toolMessageId, setToolMessageId] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<Manifest | null>(null);
+  const [previewConfig, setPreviewConfig] = useState<PreviewConfig | null>(null);
+  const [previewConfigMissing, setPreviewConfigMissing] = useState(false);
+  const [assetError, setAssetError] = useState<string | null>(null);
+  const [isLoadingAssets, setIsLoadingAssets] = useState(false);
+  const assetsJobRef = useRef<string | null>(null);
 
   const latestPrompt = useMemo(() => {
     const match = [...messages].reverse().find((message) => message.role === "user");
@@ -115,9 +118,106 @@ export const CreatePage = () => {
   }, [messages]);
   const hasPrompt = latestPrompt.trim().length > 0;
   const canSend = draft.trim().length > 0;
+  const jobOptions = useMemo(
+    () => ({
+      style: selectedStyle,
+      mood: selectedMood,
+      duration_s: duration,
+      advanced: advancedSettings,
+    }),
+    [advancedSettings, duration, selectedMood, selectedStyle]
+  );
+  const {
+    jobId,
+    jobStatus,
+    error: jobError,
+    isStarting,
+    start: startJob,
+  } = useJobRunner(latestPrompt, jobOptions);
 
   const activeStepIndex =
     inspectorStage === "complete" ? 2 : inspectorStage === "running" ? 1 : 0;
+
+  const progressValue =
+    typeof jobStatus?.progress === "number"
+      ? Math.max(0, Math.min(100, Math.round(jobStatus.progress)))
+      : 0;
+  const progressLabel = typeof jobStatus?.progress === "number" ? `${progressValue}%` : "--";
+  const progressStage = jobStatus?.stage ?? jobStatus?.status ?? "准备中";
+  const logLines =
+    jobStatus?.logs_tail && jobStatus.logs_tail.length > 0
+      ? jobStatus.logs_tail
+      : jobStatus?.message
+        ? [jobStatus.message]
+        : ["等待日志输出..."];
+  const normalizedJobStatus = jobStatus?.status?.toUpperCase() ?? "";
+  const isJobDone = normalizedJobStatus === "DONE" || normalizedJobStatus === "COMPLETED";
+  const isJobActive =
+    !!jobStatus && !["DONE", "COMPLETED", "FAILED", "ERROR"].includes(normalizedJobStatus);
+
+  const assetItems = useMemo(() => {
+    const items: Array<{ id: string; label: string; href: string; kind: string }> = [];
+    const seen = new Set<string>();
+    const addItem = (label: string, uri: string | undefined, kind: string) => {
+      if (!uri) {
+        return;
+      }
+      const href = getAssetUrl(uri);
+      if (seen.has(href)) {
+        return;
+      }
+      seen.add(href);
+      items.push({ id: `${kind}-${items.length}`, label, href, kind });
+    };
+
+    const outputs = manifest?.outputs;
+    addItem("场景全景 PNG", outputs?.scene?.panorama?.uri, "png");
+    addItem("动作 BVH", outputs?.motion?.bvh?.uri, "bvh");
+    addItem("配乐 WAV", outputs?.music?.wav?.uri, "wav");
+    addItem("预览 MP4", outputs?.export?.mp4?.uri, "mp4");
+    addItem("导出 ZIP", outputs?.export?.zip?.uri ?? undefined, "zip");
+
+    if (jobStatus) {
+      addItem("预览 MP4", jobStatus.preview_url, "mp4");
+      if (Array.isArray(jobStatus.mp4_list)) {
+        jobStatus.mp4_list.forEach((uri) => addItem("预览 MP4", uri, "mp4"));
+      }
+      addItem("动作 BVH", jobStatus.bvh_download_url ?? jobStatus.download_url, "bvh");
+      addItem("配乐 WAV", jobStatus.audio_url, "wav");
+      addItem("导出 ZIP", jobStatus.zip_url, "zip");
+    }
+
+    return items;
+  }, [jobStatus, manifest]);
+
+  const previewLinks = useMemo(
+    () => assetItems.filter((item) => ["mp4", "wav", "bvh"].includes(item.kind)),
+    [assetItems]
+  );
+
+  const toolMessageContent = useMemo(() => {
+    if (!toolMessageId) {
+      return "";
+    }
+    if (jobError) {
+      return `生成失败：${jobError}`;
+    }
+    if (!jobId) {
+      return "正在创建任务...";
+    }
+    if (!jobStatus) {
+      return `任务已创建（${jobId}），等待事件流连接...`;
+    }
+    const normalizedStatus = jobStatus.status?.toUpperCase();
+    if (normalizedStatus === "DONE" || normalizedStatus === "COMPLETED") {
+      return "生成完成，正在准备预览。";
+    }
+    if (normalizedStatus === "ERROR" || normalizedStatus === "FAILED") {
+      return `生成失败：${jobStatus.message ?? "未知错误"}`;
+    }
+    const hint = jobStatus.message ? ` · ${jobStatus.message}` : "";
+    return `生成中 ${progressLabel} · ${progressStage}${hint}`;
+  }, [jobError, jobId, jobStatus, progressLabel, progressStage, toolMessageId]);
 
   const handleSend = () => {
     const trimmed = draft.trim();
@@ -132,15 +232,116 @@ export const CreatePage = () => {
     setInspectorStage("choosing_options");
   };
 
-  const handleStartGeneration = () => {
-    const options = {
-      style: selectedStyle,
-      mood: selectedMood,
-      duration_s: duration,
-      advanced: advancedSettings,
+  useEffect(() => {
+    if (!toolMessageId || !toolMessageContent) {
+      return;
+    }
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === toolMessageId ? { ...message, content: toolMessageContent } : message
+      )
+    );
+  }, [toolMessageContent, toolMessageId]);
+
+  useEffect(() => {
+    if (!jobStatus) {
+      return;
+    }
+    const normalizedStatus = jobStatus.status?.toUpperCase();
+    if (normalizedStatus === "DONE" || normalizedStatus === "COMPLETED") {
+      setInspectorStage("complete");
+      setActiveTab("preview");
+    }
+  }, [jobStatus]);
+
+  useEffect(() => {
+    if (!jobId || !isJobDone) {
+      return;
+    }
+    if (assetsJobRef.current === jobId) {
+      return;
+    }
+    assetsJobRef.current = jobId;
+    setManifest(null);
+    setPreviewConfig(null);
+    setPreviewConfigMissing(false);
+    setAssetError(null);
+    setIsLoadingAssets(true);
+
+    let cancelled = false;
+    const loadAssets = async () => {
+      const loadError = (error: unknown) =>
+        error instanceof Error ? error.message : "资源加载失败";
+
+      try {
+        const data = await fetchManifest(jobId);
+        if (!cancelled) {
+          setManifest(data);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const status = (error as { status?: number }).status;
+          if (status && status !== 404) {
+            setAssetError(loadError(error));
+          }
+        }
+      }
+
+      try {
+        const config = await fetchPreviewConfig(jobId);
+        if (!cancelled) {
+          setPreviewConfig(config);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const status = (error as { status?: number }).status;
+          if (status === 404) {
+            setPreviewConfigMissing(true);
+          } else {
+            setAssetError(loadError(error));
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingAssets(false);
+        }
+      }
     };
-    console.log(latestPrompt, options);
+
+    loadAssets();
+    return () => {
+      cancelled = true;
+    };
+  }, [isJobDone, jobId]);
+
+  const handleStartGeneration = async () => {
+    if (!hasPrompt) {
+      return;
+    }
+    const toolId = `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: toolId, role: "tool", content: "正在创建任务..." },
+    ]);
+    setToolMessageId(toolId);
     setInspectorStage("running");
+    setManifest(null);
+    setPreviewConfig(null);
+    setPreviewConfigMissing(false);
+    setAssetError(null);
+    setIsLoadingAssets(false);
+    assetsJobRef.current = null;
+    try {
+      await startJob();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "任务创建失败";
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.id === toolId ? { ...item, content: `创建失败：${message}` } : item
+        )
+      );
+      setInspectorStage("choosing_options");
+    }
   };
 
   const handleComplete = () => {
@@ -391,7 +592,7 @@ export const CreatePage = () => {
                   <button
                     type="button"
                     className="primary-button"
-                    disabled={!hasPrompt}
+                    disabled={!hasPrompt || isStarting || isJobActive}
                     onClick={handleStartGeneration}
                   >
                     <span>开始生成</span>
@@ -408,20 +609,20 @@ export const CreatePage = () => {
                     <div className="progress-header">
                       <div>
                         <div className="progress-title">生成中</div>
-                        <div className="progress-subtitle">阶段：渲染场景层</div>
+                        <div className="progress-subtitle">阶段：{progressStage}</div>
                       </div>
-                      <div className="progress-value">68%</div>
+                      <div className="progress-value">{progressLabel}</div>
                     </div>
                     <div className="progress-bar">
-                      <div className="progress-fill" style={{ width: "68%" }} />
+                      <div className="progress-fill" style={{ width: `${progressValue}%` }} />
                     </div>
                   </div>
 
                   <div className="log-panel">
                     <div className="log-panel-title">实时日志</div>
                     <ul className="log-list">
-                      {MOCK_LOGS.map((line) => (
-                        <li key={line}>{line}</li>
+                      {logLines.map((line, index) => (
+                        <li key={`${index}-${line}`}>{line}</li>
                       ))}
                     </ul>
                   </div>
@@ -464,52 +665,114 @@ export const CreatePage = () => {
                   </div>
                   <div className="inspector-tab-content">
                     {activeTab === "preview" && (
-                      <div className="preview-placeholder">
-                        <div className="preview-placeholder-screen">
-                          <div className="preview-placeholder-hint">预览将在此显示</div>
-                        </div>
-                        <div className="preview-placeholder-meta">
-                          <div className="preview-placeholder-title">预览画面</div>
-                          <div className="preview-placeholder-subtitle">
-                            生成完成后将自动加载时间轴与镜头信息。
+                      <>
+                        {previewConfig ? (
+                          <div className="preview-panel-wrapper">
+                            <PreviewPanel
+                              jobId={jobId ?? undefined}
+                              config={previewConfig}
+                              emptyMessage="预览配置已加载。"
+                            />
                           </div>
-                        </div>
-                        <div className="preview-placeholder-tags">
-                          <span className="meta-pill">16:9</span>
-                          <span className="meta-pill">4K</span>
-                          <span className="meta-pill">60fps</span>
-                        </div>
-                      </div>
+                        ) : (
+                          <div className="preview-fallback">
+                            {previewConfigMissing && (
+                              <div className="preview-fallback-banner">
+                                后端尚未生成 preview_config，已降级为资源链接。
+                              </div>
+                            )}
+                            {assetError && (
+                              <div className="preview-fallback-banner preview-fallback-error">
+                                {assetError}
+                              </div>
+                            )}
+                            {isLoadingAssets && (
+                              <div className="preview-placeholder-screen">
+                                <div className="preview-placeholder-hint">正在加载预览资源...</div>
+                              </div>
+                            )}
+                            {!isLoadingAssets && (
+                              <>
+                                <div className="preview-placeholder-screen">
+                                  <div className="preview-placeholder-hint">预览配置不可用</div>
+                                </div>
+                                <div className="preview-placeholder-meta">
+                                  <div className="preview-placeholder-title">可用资源</div>
+                                  <div className="preview-placeholder-subtitle">
+                                    点击以下链接打开或下载。
+                                  </div>
+                                </div>
+                                <div className="preview-link-list">
+                                  {previewLinks.length > 0 ? (
+                                    previewLinks.map((item) => (
+                                      <a
+                                        key={item.id}
+                                        href={item.href}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="preview-link"
+                                      >
+                                        {item.label}
+                                      </a>
+                                    ))
+                                  ) : (
+                                    <div className="preview-placeholder-subtitle">
+                                      暂无可用预览资源。
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
                     {activeTab === "assets" && (
-                      <div className="placeholder-grid">
-                        <div className="placeholder-card">
-                          <div className="placeholder-title">场景全景</div>
-                          <div className="placeholder-meta">4096 x 2048 - 待生成</div>
-                        </div>
-                        <div className="placeholder-card">
-                          <div className="placeholder-title">动作捕捉</div>
-                          <div className="placeholder-meta">BVH - 待生成</div>
-                        </div>
-                        <div className="placeholder-card">
-                          <div className="placeholder-title">配乐轨道</div>
-                          <div className="placeholder-meta">WAV - 待生成</div>
-                        </div>
+                      <div className="assets-panel">
+                        {isLoadingAssets && (
+                          <div className="inspector-callout">正在加载资产清单...</div>
+                        )}
+                        {!isLoadingAssets && assetError && (
+                          <div className="inspector-callout">{assetError}</div>
+                        )}
+                        {!isLoadingAssets && assetItems.length === 0 && (
+                          <div className="inspector-callout">暂无可下载资源。</div>
+                        )}
+                        {!isLoadingAssets && assetItems.length > 0 && (
+                          <div className="placeholder-grid">
+                            {assetItems.map((item) => (
+                              <div key={item.id} className="placeholder-card">
+                                <div className="placeholder-title">{item.label}</div>
+                                <a
+                                  className="asset-link"
+                                  href={item.href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  打开/下载
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                     {activeTab === "export" && (
-                      <div className="placeholder-grid">
-                        <div className="placeholder-card">
-                          <div className="placeholder-title">打包下载</div>
-                          <div className="placeholder-meta">ZIP Bundle - 禁用</div>
-                        </div>
-                        <div className="placeholder-card">
-                          <div className="placeholder-title">分享链接</div>
-                          <div className="placeholder-meta">Public URL - 禁用</div>
-                        </div>
-                        <div className="placeholder-card">
-                          <div className="placeholder-title">发布画廊</div>
-                          <div className="placeholder-meta">需要审核</div>
+                      <div className="export-panel">
+                        <div className="inspector-callout">后端未实现则置灰。</div>
+                        <div className="placeholder-grid export-disabled">
+                          <div className="placeholder-card">
+                            <div className="placeholder-title">打包下载</div>
+                            <div className="placeholder-meta">ZIP Bundle - 禁用</div>
+                          </div>
+                          <div className="placeholder-card">
+                            <div className="placeholder-title">分享链接</div>
+                            <div className="placeholder-meta">Public URL - 禁用</div>
+                          </div>
+                          <div className="placeholder-card">
+                            <div className="placeholder-title">发布画廊</div>
+                            <div className="placeholder-meta">需要审核</div>
+                          </div>
                         </div>
                       </div>
                     )}
