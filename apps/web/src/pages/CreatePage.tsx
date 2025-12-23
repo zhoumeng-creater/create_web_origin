@@ -20,13 +20,6 @@ type ChatMessage = {
 type InspectorStage = "choosing_options" | "running" | "complete";
 type InspectorTab = "preview" | "assets" | "export";
 
-const ROLE_LABELS: Record<MessageRole, string> = {
-  user: "用户",
-  system: "计划",
-  tool: "进度",
-  result: "结果",
-};
-
 const INSPECTOR_STAGE_LABELS: Record<InspectorStage, string> = {
   choosing_options: "参数",
   running: "生成中",
@@ -125,17 +118,8 @@ const INITIAL_MESSAGES: ChatMessage[] = [
   {
     id: "system-1",
     role: "system",
-    content: "我是你的创作助理，会把你的描述拆解成镜头、情绪与节奏。",
-  },
-  {
-    id: "tool-1",
-    role: "tool",
-    content: "右侧面板已准备好记录风格与参数。",
-  },
-  {
-    id: "result-1",
-    role: "result",
-    content: "发送一句话描述，开始构建场景。",
+    content:
+      "我是你的创作助理，会把你的描述拆解成镜头、情绪与节奏。右侧面板已准备好记录风格与参数。发送一句话描述，开始构建场景。",
   },
 ];
 
@@ -246,6 +230,15 @@ export const CreatePage = () => {
     },
     [draft]
   );
+
+  const adjustSeed = useCallback((delta: number) => {
+    setAdvancedSettings((prev) => {
+      const current = Number(prev.seed);
+      const base = Number.isFinite(current) ? current : 0;
+      const next = Math.max(0, base + delta);
+      return { ...prev, seed: String(next) };
+    });
+  }, []);
 
   const handleNewProject = useCallback(() => {
     stop();
@@ -650,7 +643,6 @@ export const CreatePage = () => {
             <ul className="chat-thread" ref={chatThreadRef}>
               {messages.map((message) => (
                 <li key={message.id} className={`chat-message chat-message-${message.role}`}>
-                  <div className="chat-message-meta">{ROLE_LABELS[message.role]}</div>
                   <div className="chat-message-content">{message.content}</div>
                 </li>
               ))}
@@ -676,40 +668,51 @@ export const CreatePage = () => {
                     </button>
                   ))}
                 </div>
-                <textarea
-                  ref={inputRef}
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  placeholder="描述你的场景、光线、动作与配乐..."
-                  rows={3}
-                />
+                <div className="chat-input-box">
+                  <textarea
+                    ref={inputRef}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        handleSend();
+                      }
+                    }}
+                    placeholder="描述你的场景、光线、动作与配乐..."
+                    rows={3}
+                  />
+                  <button
+                    type="submit"
+                    className="send-button"
+                    disabled={!canSend}
+                    aria-label="发送"
+                  >
+                    <svg
+                      className="button-icon"
+                      viewBox="0 0 20 20"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <path
+                        d="M4 10h9"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M10 5l5 5-5 5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
                 <div className="chat-input-hint">Enter 发送，Shift + Enter 换行。</div>
               </div>
-              <button type="submit" className="send-button" disabled={!canSend}>
-                <span>发送</span>
-                <svg className="button-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                  <path
-                    d="M4 10h9"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M10 5l5 5-5 5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
             </form>
           </div>
         </main>
@@ -830,19 +833,57 @@ export const CreatePage = () => {
                         </label>
                         <label className="field-row">
                           <span>随机种子</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            placeholder="自动"
-                            value={advancedSettings.seed}
-                            onChange={(event) =>
-                              setAdvancedSettings((prev) => ({
-                                ...prev,
-                                seed: event.target.value,
-                              }))
-                            }
-                          />
+                          <div className="seed-field">
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              placeholder="自动"
+                              value={advancedSettings.seed}
+                              onChange={(event) =>
+                                setAdvancedSettings((prev) => ({
+                                  ...prev,
+                                  seed: event.target.value,
+                                }))
+                              }
+                            />
+                            <div className="seed-stepper">
+                              <button
+                                type="button"
+                                className="seed-stepper-button"
+                                onClick={() => adjustSeed(1)}
+                                aria-label="增加随机种子"
+                              >
+                                <svg viewBox="0 0 12 12" aria-hidden="true">
+                                  <path
+                                    d="M3 7l3-3 3 3"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.4"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                className="seed-stepper-button"
+                                onClick={() => adjustSeed(-1)}
+                                aria-label="减少随机种子"
+                              >
+                                <svg viewBox="0 0 12 12" aria-hidden="true">
+                                  <path
+                                    d="M3 5l3 3 3-3"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.4"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
                         </label>
                         <label className="field-row">
                           <span>分辨率</span>

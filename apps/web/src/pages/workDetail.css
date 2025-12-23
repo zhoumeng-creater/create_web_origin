@@ -368,6 +368,16 @@
   border-radius: 10px;
   padding: 8px 10px;
   color: #e5e7eb;
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 8px;
+  padding-right: 32px;
+  cursor: pointer;
   transition: border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease);
 }
 

@@ -111,6 +111,16 @@
   border: 1px solid #2a3544;
   border-radius: 8px;
   padding: 4px 8px;
+  font-family: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: var(--select-arrow);
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px 8px;
+  padding-right: 28px;
+  cursor: pointer;
   transition: border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease),
     background-color var(--enter) var(--ease);
 }
