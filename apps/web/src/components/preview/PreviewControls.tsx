@@ -67,7 +67,7 @@ export const PreviewControls = ({
         onClick={onTogglePlay}
         aria-pressed={playing}
       >
-        {playing ? "Pause" : "Play"}
+        {playing ? "暂停" : "播放"}
       </button>
       <div className="three-preview-progress">
         <input
@@ -80,7 +80,7 @@ export const PreviewControls = ({
           onPointerDown={onSeekStart}
           onPointerUp={onSeekEnd}
           onPointerCancel={onSeekEnd}
-          aria-label="Timeline"
+          aria-label="时间轴"
           className="three-preview-range"
         />
         <div className="three-preview-time">
@@ -88,7 +88,7 @@ export const PreviewControls = ({
         </div>
       </div>
       <label className="three-preview-speed">
-        <span>Speed</span>
+        <span>速度</span>
         <select value={speed} onChange={handleSpeedChange}>
           {speedOptions.map((value) => (
             <option key={value} value={value}>
@@ -103,7 +103,7 @@ export const PreviewControls = ({
         onClick={onToggleMute}
         aria-pressed={muted}
       >
-        {muted ? "Unmute" : "Mute"}
+        {muted ? "取消静音" : "静音"}
       </button>
     </div>
   );

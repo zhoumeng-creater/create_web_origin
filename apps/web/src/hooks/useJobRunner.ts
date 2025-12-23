@@ -55,6 +55,12 @@ const extractEventInfo = (data: unknown) => {
       toString(record.hint) ??
       toString(record.error),
     logsTail: extractLogsTail(record.logs_tail) ?? extractLogsTail(record.hints),
+    queue_position:
+      toNumber(record.queue_position) ??
+      toNumber(record.queuePosition) ??
+      toNumber(record.queue_index) ??
+      toNumber(record.queueIndex) ??
+      toNumber(record.queue),
     preview_url: toString(record.preview_url),
     audio_url: toString(record.audio_url),
     bvh_download_url: toString(record.bvh_download_url ?? record.download_url),
@@ -87,6 +93,9 @@ const applyEventToStatus = (prev: JobStatus | null, event: JobEvent): JobStatus 
 
   if (info.preview_url) {
     next.preview_url = info.preview_url;
+  }
+  if (info.queue_position !== undefined) {
+    next.queue_position = info.queue_position;
   }
   if (info.audio_url) {
     next.audio_url = info.audio_url;
@@ -158,6 +167,9 @@ const mergePolledStatus = (prev: JobStatus | null, next: JobStatus): JobStatus =
   const merged: JobStatus = { ...(prev ?? { status: next.status }), ...next };
   if (next.progress === undefined && prev?.progress !== undefined) {
     merged.progress = prev.progress;
+  }
+  if (next.queue_position === undefined && prev?.queue_position !== undefined) {
+    merged.queue_position = prev.queue_position;
   }
   if (!next.stage && prev?.stage) {
     merged.stage = prev.stage;

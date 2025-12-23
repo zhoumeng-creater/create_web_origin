@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { LibraryFilters } from "../components/library/LibraryFilters";
+import { LibraryCommandBar } from "../components/library/LibraryCommandBar";
+import { LibraryFilterDrawer } from "../components/library/LibraryFilterDrawer";
+import type { FilterOption } from "../components/library/LibraryFilters";
 import { WorkCard } from "../components/library/WorkCard";
 import { useRecentWorks } from "../hooks/useRecentWorks";
 import { fetchManifest } from "../lib/api";
@@ -27,14 +29,14 @@ type WorkSummary = {
   error?: string;
 };
 
-const durationOptions = [
+const durationOptions: FilterOption[] = [
   { value: "any", label: "Any duration" },
   { value: "short", label: "0-10s" },
   { value: "medium", label: "10-30s" },
   { value: "long", label: "30s+" },
 ];
 
-const dateOptions = [
+const dateOptions: FilterOption[] = [
   { value: "any", label: "Any date" },
   { value: "has", label: "Has date" },
   { value: "none", label: "No date" },
@@ -84,6 +86,7 @@ export const LibraryPage = () => {
   const [styleFilter, setStyleFilter] = useState("all");
   const [durationFilter, setDurationFilter] = useState("any");
   const [dateFilter, setDateFilter] = useState("any");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const updateManifestMap = useCallback(
     (updater: (prev: Record<string, ManifestEntry>) => Record<string, ManifestEntry>) => {
@@ -183,6 +186,71 @@ export const LibraryPage = () => {
     return options;
   }, [works]);
 
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{ id: string; label: string; onClear: () => void }> = [];
+    const trimmedQuery = query.trim();
+    if (trimmedQuery) {
+      chips.push({
+        id: "query",
+        label: `Search: ${truncate(trimmedQuery, 32)}`,
+        onClear: () => setQuery(""),
+      });
+    }
+    if (styleFilter !== "all") {
+      const styleLabel =
+        styleOptions.find((option) => option.value === styleFilter)?.label ?? styleFilter;
+      chips.push({
+        id: "style",
+        label: `Style: ${styleLabel}`,
+        onClear: () => setStyleFilter("all"),
+      });
+    }
+    if (durationFilter !== "any") {
+      const durationLabel =
+        durationOptions.find((option) => option.value === durationFilter)?.label ??
+        durationFilter;
+      chips.push({
+        id: "duration",
+        label: `Duration: ${durationLabel}`,
+        onClear: () => setDurationFilter("any"),
+      });
+    }
+    if (dateFilter !== "any") {
+      const dateLabel =
+        dateOptions.find((option) => option.value === dateFilter)?.label ?? dateFilter;
+      chips.push({
+        id: "date",
+        label: `Date: ${dateLabel}`,
+        onClear: () => setDateFilter("any"),
+      });
+    }
+    return chips;
+  }, [
+    dateFilter,
+    durationFilter,
+    query,
+    setDateFilter,
+    setDurationFilter,
+    setQuery,
+    setStyleFilter,
+    styleFilter,
+    styleOptions,
+  ]);
+
+  const filterCount = useMemo(() => {
+    let count = 0;
+    if (styleFilter !== "all") {
+      count += 1;
+    }
+    if (durationFilter !== "any") {
+      count += 1;
+    }
+    if (dateFilter !== "any") {
+      count += 1;
+    }
+    return count;
+  }, [dateFilter, durationFilter, styleFilter]);
+
   const filteredWorks = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return works.filter((work) => {
@@ -217,36 +285,27 @@ export const LibraryPage = () => {
   return (
     <div className="page library-page">
       <header className="page-header library-header">
-        <div>
+        <div className="library-title-block">
           <h1 className="page-title">Library</h1>
-          <p className="page-subtitle">Browse recent works saved locally.</p>
+          <p className="page-subtitle">Recent works stored locally.</p>
         </div>
-        <div className="library-count">
-          {filteredWorks.length} of {works.length} works
-        </div>
+        <div className="library-count">{filteredWorks.length} results</div>
       </header>
-      <LibraryFilters
+      <LibraryCommandBar
         query={query}
-        style={styleFilter}
-        duration={durationFilter}
-        date={dateFilter}
-        styleOptions={styleOptions}
-        durationOptions={durationOptions}
-        dateOptions={dateOptions}
+        filterCount={filterCount}
+        chips={activeFilterChips}
+        isFiltersOpen={filtersOpen}
         onQueryChange={setQuery}
-        onStyleChange={setStyleFilter}
-        onDurationChange={setDurationFilter}
-        onDateChange={setDateFilter}
-        onClear={() => {
-          setQuery("");
-          setStyleFilter("all");
-          setDurationFilter("any");
-          setDateFilter("any");
-        }}
+        onOpenFilters={() => setFiltersOpen(true)}
       />
       {filteredWorks.length === 0 ? (
         <div className="library-empty">
-          No works match the current filters. Create a new job to populate this list.
+          <div className="library-empty-title">No matches yet</div>
+          <div className="library-empty-subtitle">Adjust filters or start a new creation.</div>
+          <a className="library-empty-action" href="/">
+            Create new
+          </a>
         </div>
       ) : (
         <div className="library-grid">
@@ -255,7 +314,6 @@ export const LibraryPage = () => {
               key={work.jobId}
               jobId={work.jobId}
               title={work.title}
-              prompt={work.prompt}
               thumbnailUri={work.thumbnailUri}
               style={work.style}
               duration={work.duration}
@@ -268,6 +326,24 @@ export const LibraryPage = () => {
           ))}
         </div>
       )}
+      <LibraryFilterDrawer
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        style={styleFilter}
+        duration={durationFilter}
+        date={dateFilter}
+        styleOptions={styleOptions}
+        durationOptions={durationOptions}
+        dateOptions={dateOptions}
+        onStyleChange={setStyleFilter}
+        onDurationChange={setDurationFilter}
+        onDateChange={setDateFilter}
+        onClear={() => {
+          setStyleFilter("all");
+          setDurationFilter("any");
+          setDateFilter("any");
+        }}
+      />
     </div>
   );
 };

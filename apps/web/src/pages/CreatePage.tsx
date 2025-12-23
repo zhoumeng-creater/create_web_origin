@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import { PreviewPanel } from "../components/preview/PreviewPanel";
 import { useJobRunner } from "../hooks/useJobRunner";
+import { useRecentWorks } from "../hooks/useRecentWorks";
 import { fetchManifest, fetchPreviewConfig, getAssetUrl } from "../lib/api";
+import { saveRecentWork } from "../lib/storage";
 import type { Manifest } from "../types/manifest";
 import type { PreviewConfig } from "../types/previewConfig";
 import "./pages.css";
@@ -19,9 +21,9 @@ type InspectorStage = "choosing_options" | "running" | "complete";
 type InspectorTab = "preview" | "assets" | "export";
 
 const ROLE_LABELS: Record<MessageRole, string> = {
-  user: "你",
-  system: "系统",
-  tool: "工具",
+  user: "用户",
+  system: "计划",
+  tool: "进度",
   result: "结果",
 };
 
@@ -35,30 +37,66 @@ const STYLE_OPTIONS = [
   {
     id: "cinematic",
     title: "电影感",
-    description: "高对比灯光与大景别构图。",
-  },
-  {
-    id: "studio",
-    title: "棚拍",
-    description: "干净布光、均衡曝光、清晰色彩。",
-  },
-  {
-    id: "noir",
-    title: "黑色电影",
-    description: "冷冽阴影与克制的反差。",
+    description: "高对比光影与大片构图。",
   },
   {
     id: "anime",
     title: "动漫",
     description: "线条化渲染与高饱和色彩。",
   },
+  {
+    id: "low_poly",
+    title: "低多边形",
+    description: "块面几何与简化质感。",
+  },
+  {
+    id: "realistic",
+    title: "写实",
+    description: "真实光照与细节层次。",
+  },
 ];
 
 const MOOD_OPTIONS = [
+  { id: "epic", label: "史诗" },
   { id: "calm", label: "平静" },
-  { id: "energetic", label: "充沛" },
-  { id: "dreamy", label: "梦幻" },
+  { id: "horror", label: "恐怖" },
 ];
+
+const MODEL_OPTIONS = [
+  { value: "atlas_3_preview", label: "Atlas-3 预览" },
+  { value: "atlas_3_pro", label: "Atlas-3 高级" },
+];
+
+const RESOLUTION_PRESETS = [
+  { id: "panorama_2k", label: "全景 2K (2048×1024)", value: [2048, 1024] as [number, number] },
+  { id: "1080p", label: "1080p (1920×1080)", value: [1920, 1080] as [number, number] },
+  { id: "720p", label: "720p (1280×720)", value: [1280, 720] as [number, number] },
+];
+
+const EXPORT_PRESETS = [
+  { value: "mp4_720p", label: "720p（1280×720）" },
+  { value: "mp4_1080p", label: "1080p（1920×1080）" },
+  { value: "mp4_4k", label: "4K（3840×2160）" },
+];
+
+const STAGE_LABELS: Record<string, string> = {
+  QUEUED: "排队中",
+  PLANNING: "规划",
+  RUNNING_MOTION: "动作",
+  RUNNING_SCENE: "场景",
+  RUNNING_MUSIC: "音乐",
+  COMPOSING_PREVIEW: "预览合成",
+  EXPORTING_VIDEO: "导出",
+  DONE: "完成",
+  FAILED: "失败",
+  CANCELED: "已取消",
+  ERROR: "错误",
+};
+
+const resolveStageLabel = (stage?: string, status?: string) => {
+  const key = (stage ?? status ?? "").toUpperCase();
+  return STAGE_LABELS[key] ?? stage ?? status ?? "准备中";
+};
 
 const INSPECTOR_STEPS = [
   { id: "options", label: "参数" },
@@ -67,10 +105,21 @@ const INSPECTOR_STEPS = [
 ];
 
 const INSPECTOR_TABS = [
-  { id: "preview", label: "Preview" },
-  { id: "assets", label: "Assets" },
-  { id: "export", label: "Export" },
+  { id: "preview", label: "预览" },
+  { id: "assets", label: "素材" },
+  { id: "export", label: "导出" },
 ] as const;
+
+const TEMPLATE_SNIPPETS = [
+  { id: "action", label: "动作", template: "动作：" },
+  { id: "shot", label: "镜头", template: "镜头：" },
+  { id: "mood", label: "氛围", template: "氛围：" },
+  { id: "duration", label: "时长", template: "时长：" },
+];
+
+const MAX_RECENT_ITEMS = 10;
+
+const createMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -91,18 +140,21 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 ];
 
 export const CreatePage = () => {
+  const { items: recentWorks } = useRecentWorks();
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [draft, setDraft] = useState("");
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [inspectorStage, setInspectorStage] = useState<InspectorStage>("choosing_options");
   const [selectedStyle, setSelectedStyle] = useState(STYLE_OPTIONS[0].id);
   const [selectedMood, setSelectedMood] = useState(MOOD_OPTIONS[0].id);
   const [duration, setDuration] = useState(14);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [advancedSettings, setAdvancedSettings] = useState({
-    cinematicCamera: true,
-    ambientAudio: true,
-    detailBoost: false,
+    model: MODEL_OPTIONS[0].value,
+    seed: "",
+    resolution: RESOLUTION_PRESETS[0].id,
   });
+  const [exportPreset, setExportPreset] = useState(EXPORT_PRESETS[1]?.value ?? EXPORT_PRESETS[0].value);
   const [activeTab, setActiveTab] = useState<InspectorTab>("preview");
   const [toolMessageId, setToolMessageId] = useState<string | null>(null);
   const [manifest, setManifest] = useState<Manifest | null>(null);
@@ -111,6 +163,9 @@ export const CreatePage = () => {
   const [assetError, setAssetError] = useState<string | null>(null);
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
   const assetsJobRef = useRef<string | null>(null);
+  const chatThreadRef = useRef<HTMLUListElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const recentSaveRef = useRef<string>("");
 
   const latestPrompt = useMemo(() => {
     const match = [...messages].reverse().find((message) => message.role === "user");
@@ -118,14 +173,46 @@ export const CreatePage = () => {
   }, [messages]);
   const hasPrompt = latestPrompt.trim().length > 0;
   const canSend = draft.trim().length > 0;
+  const resolutionPreset = useMemo(
+    () => RESOLUTION_PRESETS.find((preset) => preset.id === advancedSettings.resolution),
+    [advancedSettings.resolution]
+  );
+  const seedValue = useMemo(() => {
+    const trimmed = advancedSettings.seed.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const numeric = Number(trimmed);
+    if (!Number.isFinite(numeric)) {
+      return undefined;
+    }
+    return Math.max(0, Math.floor(numeric));
+  }, [advancedSettings.seed]);
   const jobOptions = useMemo(
-    () => ({
-      style: selectedStyle,
-      mood: selectedMood,
-      duration_s: duration,
-      advanced: advancedSettings,
-    }),
-    [advancedSettings, duration, selectedMood, selectedStyle]
+    () => {
+      const advanced: {
+        model?: string;
+        seed?: number;
+        resolution?: [number, number];
+      } = {
+        model: advancedSettings.model,
+      };
+      if (seedValue !== undefined) {
+        advanced.seed = seedValue;
+      }
+      if (resolutionPreset) {
+        advanced.resolution = resolutionPreset.value;
+      }
+      return {
+        style: selectedStyle,
+        mood: selectedMood,
+        duration_s: duration,
+        export_video: true,
+        export_preset: exportPreset,
+        advanced,
+      };
+    },
+    [advancedSettings.model, duration, exportPreset, resolutionPreset, seedValue, selectedMood, selectedStyle]
   );
   const {
     jobId,
@@ -133,7 +220,48 @@ export const CreatePage = () => {
     error: jobError,
     isStarting,
     start: startJob,
+    stop,
   } = useJobRunner(latestPrompt, jobOptions);
+
+  const insertTemplate = useCallback(
+    (template: string) => {
+      const textarea = inputRef.current;
+      if (!textarea) {
+        setDraft((prev) => (prev ? `${prev}\n${template}` : template));
+        return;
+      }
+      const start = textarea.selectionStart ?? draft.length;
+      const end = textarea.selectionEnd ?? draft.length;
+      const before = draft.slice(0, start);
+      const after = draft.slice(end);
+      const needsBreak = before.length > 0 && !before.endsWith("\n");
+      const insertion = `${needsBreak ? "\n" : ""}${template}`;
+      const next = `${before}${insertion}${after}`;
+      setDraft(next);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const cursor = start + insertion.length;
+        textarea.setSelectionRange(cursor, cursor);
+      });
+    },
+    [draft]
+  );
+
+  const handleNewProject = useCallback(() => {
+    stop();
+    setMessages(INITIAL_MESSAGES);
+    setDraft("");
+    setPendingPrompt(null);
+    setToolMessageId(null);
+    setInspectorStage("choosing_options");
+    setActiveTab("preview");
+    setManifest(null);
+    setPreviewConfig(null);
+    setPreviewConfigMissing(false);
+    setAssetError(null);
+    setIsLoadingAssets(false);
+    assetsJobRef.current = null;
+  }, [stop]);
 
   const activeStepIndex =
     inspectorStage === "complete" ? 2 : inspectorStage === "running" ? 1 : 0;
@@ -143,14 +271,21 @@ export const CreatePage = () => {
       ? Math.max(0, Math.min(100, Math.round(jobStatus.progress)))
       : 0;
   const progressLabel = typeof jobStatus?.progress === "number" ? `${progressValue}%` : "--";
-  const progressStage = jobStatus?.stage ?? jobStatus?.status ?? "准备中";
+  const progressStage = resolveStageLabel(jobStatus?.stage, jobStatus?.status);
   const logLines =
     jobStatus?.logs_tail && jobStatus.logs_tail.length > 0
-      ? jobStatus.logs_tail
+      ? jobStatus.logs_tail.slice(-3)
       : jobStatus?.message
         ? [jobStatus.message]
         : ["等待日志输出..."];
+  const queuePosition = jobStatus?.queue_position;
   const normalizedJobStatus = jobStatus?.status?.toUpperCase() ?? "";
+  const queueLabel =
+    queuePosition !== undefined
+      ? `#${queuePosition}`
+      : normalizedJobStatus === "QUEUED"
+        ? "排队中"
+        : "--";
   const isJobDone = normalizedJobStatus === "DONE" || normalizedJobStatus === "COMPLETED";
   const isJobActive =
     !!jobStatus && !["DONE", "COMPLETED", "FAILED", "ERROR"].includes(normalizedJobStatus);
@@ -174,7 +309,7 @@ export const CreatePage = () => {
     addItem("场景全景 PNG", outputs?.scene?.panorama?.uri, "png");
     addItem("动作 BVH", outputs?.motion?.bvh?.uri, "bvh");
     addItem("配乐 WAV", outputs?.music?.wav?.uri, "wav");
-    addItem("预览 MP4", outputs?.export?.mp4?.uri, "mp4");
+    addItem("导出 MP4", outputs?.export?.mp4?.uri, "mp4");
     addItem("导出 ZIP", outputs?.export?.zip?.uri ?? undefined, "zip");
 
     if (jobStatus) {
@@ -194,6 +329,15 @@ export const CreatePage = () => {
     () => assetItems.filter((item) => ["mp4", "wav", "bvh"].includes(item.kind)),
     [assetItems]
   );
+  const assetDownloads = useMemo(
+    () => assetItems.filter((item) => ["png", "bvh", "wav"].includes(item.kind)),
+    [assetItems]
+  );
+  const audioPreviewUrl = jobStatus?.audio_url ?? previewConfig?.music?.wav_uri;
+  const audioPreviewSrc = audioPreviewUrl ? getAssetUrl(audioPreviewUrl) : "";
+  const exportMp4 =
+    assetItems.find((item) => item.label.includes("导出 MP4")) ??
+    assetItems.find((item) => item.kind === "mp4");
 
   const toolMessageContent = useMemo(() => {
     if (!toolMessageId) {
@@ -215,8 +359,14 @@ export const CreatePage = () => {
     if (normalizedStatus === "ERROR" || normalizedStatus === "FAILED") {
       return `生成失败：${jobStatus.message ?? "未知错误"}`;
     }
-    const hint = jobStatus.message ? ` · ${jobStatus.message}` : "";
-    return `生成中 ${progressLabel} · ${progressStage}${hint}`;
+    const toolLogLines =
+      jobStatus.logs_tail && jobStatus.logs_tail.length > 0
+        ? jobStatus.logs_tail.slice(-3)
+        : jobStatus.message
+          ? [jobStatus.message]
+          : [];
+    const logSummary = toolLogLines.length > 0 ? `\n${toolLogLines.join("\n")}` : "";
+    return `生成中 ${progressLabel} · ${progressStage}${logSummary}`;
   }, [jobError, jobId, jobStatus, progressLabel, progressStage, toolMessageId]);
 
   const handleSend = () => {
@@ -226,10 +376,13 @@ export const CreatePage = () => {
     }
     setMessages((prev) => [
       ...prev,
-      { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, role: "user", content: trimmed },
+      { id: createMessageId(), role: "user", content: trimmed },
+      { id: createMessageId(), role: "system", content: "正在规划..." },
     ]);
     setDraft("");
+    setToolMessageId(null);
     setInspectorStage("choosing_options");
+    setPendingPrompt(trimmed);
   };
 
   useEffect(() => {
@@ -314,16 +467,17 @@ export const CreatePage = () => {
     };
   }, [isJobDone, jobId]);
 
-  const handleStartGeneration = async () => {
-    if (!hasPrompt) {
+  const handleStartGeneration = useCallback(async () => {
+    if (!hasPrompt || isStarting || isJobActive) {
       return;
     }
-    const toolId = `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const toolId = `tool-${createMessageId()}`;
     setMessages((prev) => [
       ...prev,
       { id: toolId, role: "tool", content: "正在创建任务..." },
     ]);
     setToolMessageId(toolId);
+    setPendingPrompt(null);
     setInspectorStage("running");
     setManifest(null);
     setPreviewConfig(null);
@@ -342,7 +496,65 @@ export const CreatePage = () => {
       );
       setInspectorStage("choosing_options");
     }
-  };
+  }, [hasPrompt, isJobActive, isStarting, startJob]);
+
+  useEffect(() => {
+    if (!pendingPrompt) {
+      return;
+    }
+    if (latestPrompt.trim() !== pendingPrompt.trim()) {
+      return;
+    }
+    if (isStarting || isJobActive) {
+      return;
+    }
+    handleStartGeneration();
+    setPendingPrompt(null);
+  }, [handleStartGeneration, isJobActive, isStarting, latestPrompt, pendingPrompt]);
+
+  useEffect(() => {
+    const thread = chatThreadRef.current;
+    if (!thread) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+    });
+  }, [messages]);
+
+  useEffect(() => {
+    if (!jobId || !isJobDone) {
+      return;
+    }
+    if (!manifest && !previewConfig) {
+      return;
+    }
+    const title = (manifest?.inputs?.raw_prompt ?? latestPrompt).trim();
+    const previewUri =
+      manifest?.outputs?.scene?.panorama?.uri ?? previewConfig?.scene?.panorama_uri;
+    const createdAt = manifest?.created_at ?? new Date().toISOString();
+    const signature = JSON.stringify({
+      jobId,
+      title,
+      previewUri: previewUri ?? "",
+      createdAt,
+    });
+    if (recentSaveRef.current === signature) {
+      return;
+    }
+    recentSaveRef.current = signature;
+    const meta: { title?: string; createdAt?: string; previewUrl?: string } = {};
+    if (title) {
+      meta.title = title;
+    }
+    if (createdAt) {
+      meta.createdAt = createdAt;
+    }
+    if (previewUri) {
+      meta.previewUrl = previewUri;
+    }
+    saveRecentWork(jobId, meta);
+  }, [isJobDone, jobId, latestPrompt, manifest, previewConfig]);
 
   const handleComplete = () => {
     setInspectorStage("complete");
@@ -355,9 +567,14 @@ export const CreatePage = () => {
         <aside className="create-sidebar">
           <div className="sidebar-brand">
             <div className="brand-mark" aria-hidden="true" />
-            <div>
-              <div className="brand-title">Genesis Studio</div>
-              <div className="brand-subtitle">Creative Console</div>
+            <div className="brand-body">
+              <div>
+                <div className="brand-title">Genesis Studio</div>
+                <div className="brand-subtitle">Creative Console</div>
+              </div>
+              <button type="button" className="sidebar-action" onClick={handleNewProject}>
+                新建项目
+              </button>
             </div>
           </div>
           <nav className="sidebar-nav">
@@ -367,13 +584,47 @@ export const CreatePage = () => {
             </NavLink>
             <NavLink to="/works" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
               <span className="nav-dot" aria-hidden="true" />
-              作品库
+              我的作品
             </NavLink>
           </nav>
+          <div className="sidebar-recent">
+            <div className="sidebar-panel-title">最近作品</div>
+            {recentWorks.length === 0 ? (
+              <div className="sidebar-recent-empty">暂无作品</div>
+            ) : (
+              <div className="sidebar-recent-list">
+                {recentWorks.slice(0, MAX_RECENT_ITEMS).map((work) => {
+                  const rawTitle =
+                    typeof work.meta.title === "string" ? work.meta.title.trim() : "";
+                  const title = rawTitle || `作品 ${work.jobId}`;
+                  const previewUrl =
+                    typeof work.meta.previewUrl === "string" ? work.meta.previewUrl : undefined;
+                  return (
+                    <NavLink
+                      key={work.jobId}
+                      to={`/works/${work.jobId}`}
+                      className="sidebar-recent-item"
+                    >
+                      <div className="sidebar-recent-thumb">
+                        {previewUrl ? (
+                          <img src={getAssetUrl(previewUrl)} alt={title} loading="lazy" />
+                        ) : (
+                          <div className="sidebar-recent-placeholder">暂无预览</div>
+                        )}
+                      </div>
+                      <div className="sidebar-recent-info">
+                        <div className="sidebar-recent-title">{title}</div>
+                      </div>
+                    </NavLink>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div className="sidebar-panel">
-            <div className="sidebar-panel-title">Session</div>
-            <div className="sidebar-panel-item">Model: Atlas-3 Preview</div>
-            <div className="sidebar-panel-item">Mode: Storyboard</div>
+            <div className="sidebar-panel-title">会话</div>
+            <div className="sidebar-panel-item">模型：Atlas-3 Preview</div>
+            <div className="sidebar-panel-item">模式：Storyboard</div>
           </div>
         </aside>
 
@@ -396,7 +647,7 @@ export const CreatePage = () => {
           </div>
 
           <div className="chat-panel">
-            <ul className="chat-thread">
+            <ul className="chat-thread" ref={chatThreadRef}>
               {messages.map((message) => (
                 <li key={message.id} className={`chat-message chat-message-${message.role}`}>
                   <div className="chat-message-meta">{ROLE_LABELS[message.role]}</div>
@@ -413,7 +664,20 @@ export const CreatePage = () => {
               }}
             >
               <div className="chat-input-field">
+                <div className="chat-template-row">
+                  {TEMPLATE_SNIPPETS.map((snippet) => (
+                    <button
+                      key={snippet.id}
+                      type="button"
+                      className="chat-template-button"
+                      onClick={() => insertTemplate(snippet.template)}
+                    >
+                      {snippet.label}
+                    </button>
+                  ))}
+                </div>
                 <textarea
+                  ref={inputRef}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -454,7 +718,7 @@ export const CreatePage = () => {
           <div className="inspector-card">
             <div className="inspector-header">
               <div>
-                <div className="inspector-title">Inspector</div>
+                <div className="inspector-title">参数面板</div>
                 <div className="inspector-subtitle">
                   {inspectorStage === "choosing_options" && "选择风格与节奏，让系统开始生成。"}
                   {inspectorStage === "running" && "生成中，正在整理场景与素材。"}
@@ -524,7 +788,7 @@ export const CreatePage = () => {
                     <input
                       className="duration-slider"
                       type="range"
-                      min={6}
+                      min={5}
                       max={30}
                       step={1}
                       value={duration}
@@ -546,44 +810,57 @@ export const CreatePage = () => {
                     </button>
                     {advancedOpen && (
                       <div className="advanced-panel" id="advanced-settings">
-                        <label className="toggle-row">
-                          <input
-                            type="checkbox"
-                            checked={advancedSettings.cinematicCamera}
+                        <label className="field-row">
+                          <span>模型</span>
+                          <select
+                            value={advancedSettings.model}
                             onChange={(event) =>
                               setAdvancedSettings((prev) => ({
                                 ...prev,
-                                cinematicCamera: event.target.checked,
+                                model: event.target.value,
                               }))
                             }
-                          />
-                          电影级镜头运动
+                          >
+                            {MODEL_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                         </label>
-                        <label className="toggle-row">
+                        <label className="field-row">
+                          <span>随机种子</span>
                           <input
-                            type="checkbox"
-                            checked={advancedSettings.ambientAudio}
+                            type="number"
+                            min={0}
+                            step={1}
+                            placeholder="自动"
+                            value={advancedSettings.seed}
                             onChange={(event) =>
                               setAdvancedSettings((prev) => ({
                                 ...prev,
-                                ambientAudio: event.target.checked,
+                                seed: event.target.value,
                               }))
                             }
                           />
-                          环境音铺底
                         </label>
-                        <label className="toggle-row">
-                          <input
-                            type="checkbox"
-                            checked={advancedSettings.detailBoost}
+                        <label className="field-row">
+                          <span>分辨率</span>
+                          <select
+                            value={advancedSettings.resolution}
                             onChange={(event) =>
                               setAdvancedSettings((prev) => ({
                                 ...prev,
-                                detailBoost: event.target.checked,
+                                resolution: event.target.value,
                               }))
                             }
-                          />
-                          细节增强
+                          >
+                            {RESOLUTION_PRESETS.map((preset) => (
+                              <option key={preset.id} value={preset.id}>
+                                {preset.label}
+                              </option>
+                            ))}
+                          </select>
                         </label>
                       </div>
                     )}
@@ -605,14 +882,15 @@ export const CreatePage = () => {
 
               {inspectorStage === "running" && (
                 <>
-                  <div className="inspector-progress">
-                    <div className="progress-header">
-                      <div>
-                        <div className="progress-title">生成中</div>
-                        <div className="progress-subtitle">阶段：{progressStage}</div>
-                      </div>
-                      <div className="progress-value">{progressLabel}</div>
+                <div className="inspector-progress">
+                  <div className="progress-header">
+                    <div>
+                      <div className="progress-title">生成中</div>
+                      <div className="progress-subtitle">阶段：{progressStage}</div>
+                      <div className="progress-meta">队列位置：{queueLabel}</div>
                     </div>
+                    <div className="progress-value">{progressLabel}</div>
+                  </div>
                     <div className="progress-bar">
                       <div className="progress-fill" style={{ width: `${progressValue}%` }} />
                     </div>
@@ -725,6 +1003,14 @@ export const CreatePage = () => {
                             )}
                           </div>
                         )}
+                        {audioPreviewSrc ? (
+                          <div className="preview-audio">
+                            <div className="preview-audio-title">音频预览</div>
+                            <audio controls src={audioPreviewSrc} preload="none" />
+                          </div>
+                        ) : (
+                          <div className="preview-audio-empty">暂无音频</div>
+                        )}
                       </>
                     )}
                     {activeTab === "assets" && (
@@ -735,12 +1021,12 @@ export const CreatePage = () => {
                         {!isLoadingAssets && assetError && (
                           <div className="inspector-callout">{assetError}</div>
                         )}
-                        {!isLoadingAssets && assetItems.length === 0 && (
+                        {!isLoadingAssets && assetDownloads.length === 0 && (
                           <div className="inspector-callout">暂无可下载资源。</div>
                         )}
-                        {!isLoadingAssets && assetItems.length > 0 && (
+                        {!isLoadingAssets && assetDownloads.length > 0 && (
                           <div className="placeholder-grid">
-                            {assetItems.map((item) => (
+                            {assetDownloads.map((item) => (
                               <div key={item.id} className="placeholder-card">
                                 <div className="placeholder-title">{item.label}</div>
                                 <a
@@ -759,19 +1045,35 @@ export const CreatePage = () => {
                     )}
                     {activeTab === "export" && (
                       <div className="export-panel">
-                        <div className="inspector-callout">后端未实现则置灰。</div>
-                        <div className="placeholder-grid export-disabled">
-                          <div className="placeholder-card">
-                            <div className="placeholder-title">打包下载</div>
-                            <div className="placeholder-meta">ZIP Bundle - 禁用</div>
-                          </div>
-                          <div className="placeholder-card">
-                            <div className="placeholder-title">分享链接</div>
-                            <div className="placeholder-meta">Public URL - 禁用</div>
-                          </div>
-                          <div className="placeholder-card">
-                            <div className="placeholder-title">发布画廊</div>
-                            <div className="placeholder-meta">需要审核</div>
+                        <div className="export-settings">
+                          <label className="export-field">
+                            <span>导出预设</span>
+                            <select
+                              value={exportPreset}
+                              onChange={(event) => setExportPreset(event.target.value)}
+                            >
+                              {EXPORT_PRESETS.map((preset) => (
+                                <option key={preset.value} value={preset.value}>
+                                  {preset.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <div className="export-actions">
+                          {exportMp4 ? (
+                            <a className="primary-button export-button" href={exportMp4.href} download>
+                              导出视频
+                            </a>
+                          ) : (
+                            <button type="button" className="primary-button export-button" disabled>
+                              导出视频
+                            </button>
+                          )}
+                          <div className="export-note">
+                            {exportMp4
+                              ? "视频已生成，可直接下载。"
+                              : "导出资源尚未生成或导出服务未接入。"}
                           </div>
                         </div>
                       </div>

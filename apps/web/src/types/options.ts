@@ -4,5 +4,11 @@ export type CreateJobOptions = {
   style?: string;
   mood?: string;
   export_video?: boolean;
+  export_preset?: string;
+  advanced?: {
+    model?: string;
+    seed?: number;
+    resolution?: [number, number];
+  };
   [key: string]: unknown;
 };

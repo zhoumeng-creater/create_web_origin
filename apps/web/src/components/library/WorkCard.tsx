@@ -1,11 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getAssetUrl } from "../../lib/api";
 
 type WorkCardProps = {
   jobId: string;
   title: string;
-  prompt?: string;
   thumbnailUri?: string;
   style?: string;
   duration?: number;
@@ -38,7 +37,6 @@ const formatDate = (value?: string) => {
 export const WorkCard = ({
   jobId,
   title,
-  prompt,
   thumbnailUri,
   style,
   duration,
@@ -49,14 +47,46 @@ export const WorkCard = ({
   onRemove,
 }: WorkCardProps) => {
   const [imageFailed, setImageFailed] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const thumbnailUrl = useMemo(
     () => (thumbnailUri ? getAssetUrl(thumbnailUri) : undefined),
     [thumbnailUri]
   );
-  const displayStatus = error ? "error" : loading ? "loading" : status ?? "unknown";
   const displayStyle = style || "default";
   const displayDuration = formatDuration(duration);
   const displayDate = formatDate(createdAt);
+  const normalizedStatus = (status ?? "").toLowerCase();
+  const rawStatus = error ? "error" : loading ? "loading" : normalizedStatus || "unknown";
+  const displayStatus = rawStatus
+    .replace(/_/g, " ")
+    .replace(/^\w/, (match) => match.toUpperCase());
+  const hasStatus = Boolean(error || loading || normalizedStatus);
+  const statusTone = error
+    ? "error"
+    : loading
+      ? "loading"
+      : ["done", "completed", "success"].includes(normalizedStatus)
+        ? "ready"
+        : normalizedStatus
+          ? "idle"
+          : "unknown";
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [menuOpen]);
 
   return (
     <article className="work-card">
@@ -77,22 +107,55 @@ export const WorkCard = ({
         </div>
         <div className="work-card-body">
           <div className="work-card-title">{title}</div>
-          {prompt ? <div className="work-card-prompt">{prompt}</div> : null}
-          <div className="work-card-tags">
-            <span>{`style: ${displayStyle}`}</span>
-            <span>{`duration: ${displayDuration}`}</span>
-            <span>{`status: ${displayStatus}`}</span>
+          <div className="work-card-meta">
+            <span className="work-card-tag">{displayStyle}</span>
+            <span className="work-card-tag">{displayDuration}</span>
           </div>
-          {displayDate ? <div className="work-card-date">{displayDate}</div> : null}
+          <div className="work-card-meta-secondary">
+            {hasStatus ? <span className={`work-card-status ${statusTone}`}>{displayStatus}</span> : null}
+            {displayDate ? <span className="work-card-date">{displayDate}</span> : null}
+          </div>
         </div>
       </a>
-      <button
-        type="button"
-        className="work-card-remove"
-        onClick={() => onRemove(jobId)}
+      <div
+        className="work-card-actions"
+        ref={menuRef}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setMenuOpen(false);
+          }
+        }}
       >
-        Remove
-      </button>
+        <button
+          type="button"
+          className="work-card-action-button"
+          aria-label="More actions"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setMenuOpen((prev) => !prev);
+          }}
+        >
+          ...
+        </button>
+        <div className={`work-card-menu${menuOpen ? " open" : ""}`} role="menu">
+          <button
+            type="button"
+            className="work-card-menu-item"
+            role="menuitem"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setMenuOpen(false);
+              onRemove(jobId);
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      </div>
     </article>
   );
 };

@@ -4,7 +4,7 @@ import { useFrame, useLoader, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { BVHLoader } from "three/examples/jsm/loaders/BVHLoader";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader";
-import { SkeletonUtils } from "three/examples/jsm/utils/SkeletonUtils";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils";
 
 import { getAssetUrl } from "../../lib/api";
 import type { PreviewConfig } from "../../types/previewConfig";
