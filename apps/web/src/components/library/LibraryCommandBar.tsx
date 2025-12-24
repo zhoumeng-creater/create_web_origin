@@ -24,13 +24,13 @@ export const LibraryCommandBar = ({
   <div className="library-command">
     <div className="library-command-bar">
       <label className="library-command-search">
-        <span className="sr-only">Search works</span>
+        <span className="sr-only">搜索作品</span>
         <input
           type="search"
-          placeholder="Search works"
+          placeholder="搜索作品"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          aria-label="Search works"
+          aria-label="搜索作品"
         />
       </label>
       <button
@@ -48,9 +48,9 @@ export const LibraryCommandBar = ({
             strokeLinecap="round"
           />
         </svg>
-        <span>Filters</span>
+        <span>筛选</span>
         {filterCount > 0 ? (
-          <span className="library-command-count" aria-label={`${filterCount} active filters`}>
+          <span className="library-command-count" aria-label={`已启用 ${filterCount} 个筛选`}>
             {filterCount}
           </span>
         ) : null}

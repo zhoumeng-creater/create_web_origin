@@ -30,7 +30,7 @@ export const LibraryFilters = ({
 }: LibraryFiltersProps) => (
   <div className="library-filter-panel">
     <label className="library-filter-field">
-      <span>Style</span>
+      <span>风格</span>
       <select value={style} onChange={(event) => onStyleChange(event.target.value)}>
         {styleOptions.map((option) => (
           <option key={option.value} value={option.value}>
@@ -40,7 +40,7 @@ export const LibraryFilters = ({
       </select>
     </label>
     <label className="library-filter-field">
-      <span>Duration</span>
+      <span>时长</span>
       <select value={duration} onChange={(event) => onDurationChange(event.target.value)}>
         {durationOptions.map((option) => (
           <option key={option.value} value={option.value}>
@@ -50,7 +50,7 @@ export const LibraryFilters = ({
       </select>
     </label>
     <label className="library-filter-field">
-      <span>Date</span>
+      <span>日期</span>
       <select value={date} onChange={(event) => onDateChange(event.target.value)}>
         {dateOptions.map((option) => (
           <option key={option.value} value={option.value}>
@@ -61,7 +61,7 @@ export const LibraryFilters = ({
     </label>
     <div className="library-filter-actions">
       <button type="button" className="library-filter-clear" onClick={onClear}>
-        Clear filters
+        清空筛选
       </button>
     </div>
   </div>

@@ -56,14 +56,14 @@ export const LibraryFilterDrawer = ({
       id="library-filters-drawer"
     >
       <div className="library-drawer-overlay" role="presentation" onClick={onClose} />
-      <aside className="library-drawer-panel" role="dialog" aria-modal="true" aria-label="Filters">
+      <aside className="library-drawer-panel" role="dialog" aria-modal="true" aria-label="筛选">
         <header className="library-drawer-header">
           <div>
-            <div className="library-drawer-title">Filters</div>
-            <div className="library-drawer-subtitle">Refine your library view.</div>
+            <div className="library-drawer-title">筛选</div>
+            <div className="library-drawer-subtitle">细化作品筛选条件。</div>
           </div>
           <button type="button" className="library-drawer-close" onClick={onClose}>
-            Close
+            关闭
           </button>
         </header>
         <LibraryFilters

@@ -17,6 +17,11 @@ type ChatMessage = {
   content: string;
 };
 
+type SelectOption = {
+  value: string;
+  label: string;
+};
+
 type InspectorStage = "choosing_options" | "running" | "complete";
 type InspectorTab = "preview" | "assets" | "export";
 
@@ -55,7 +60,7 @@ const MOOD_OPTIONS = [
   { id: "horror", label: "恐怖" },
 ];
 
-const MODEL_OPTIONS = [
+const MODEL_OPTIONS: SelectOption[] = [
   { value: "atlas_3_preview", label: "Atlas-3 预览" },
   { value: "atlas_3_pro", label: "Atlas-3 高级" },
 ];
@@ -65,6 +70,11 @@ const RESOLUTION_PRESETS = [
   { id: "1080p", label: "1080p (1920×1080)", value: [1920, 1080] as [number, number] },
   { id: "720p", label: "720p (1280×720)", value: [1280, 720] as [number, number] },
 ];
+
+const RESOLUTION_SELECT_OPTIONS: SelectOption[] = RESOLUTION_PRESETS.map((preset) => ({
+  value: preset.id,
+  label: preset.label,
+}));
 
 const EXPORT_PRESETS = [
   { value: "mp4_720p", label: "720p（1280×720）" },
@@ -122,6 +132,77 @@ const INITIAL_MESSAGES: ChatMessage[] = [
       "我是你的创作助理，会把你的描述拆解成镜头、情绪与节奏。右侧面板已准备好记录风格与参数。发送一句话描述，开始构建场景。",
   },
 ];
+
+type SelectMenuProps = {
+  value: string;
+  options: SelectOption[];
+  ariaLabel: string;
+  onChange: (value: string) => void;
+};
+
+const SelectMenu = ({ value, options, ariaLabel, onChange }: SelectMenuProps) => {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointer);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointer);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className={`select-menu${open ? " open" : ""}`} ref={menuRef}>
+      <button
+        type="button"
+        className="select-trigger"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+      >
+        <span>{selected?.label ?? "请选择"}</span>
+        <span className="select-caret" aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="select-panel" role="listbox" aria-label={ariaLabel}>
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`select-option${option.value === value ? " active" : ""}`}
+              role="option"
+              aria-selected={option.value === value}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const CreatePage = () => {
   const { items: recentWorks } = useRecentWorks();
@@ -800,7 +881,7 @@ export const CreatePage = () => {
                     <div className="duration-hint">片段越短，生成速度越快。</div>
                   </div>
 
-                  <div className="inspector-section">
+                  <div className="inspector-section advanced-settings">
                     <button
                       type="button"
                       className="advanced-toggle"
@@ -815,21 +896,17 @@ export const CreatePage = () => {
                       <div className="advanced-panel" id="advanced-settings">
                         <label className="field-row">
                           <span>模型</span>
-                          <select
+                          <SelectMenu
                             value={advancedSettings.model}
-                            onChange={(event) =>
+                            options={MODEL_OPTIONS}
+                            ariaLabel="模型"
+                            onChange={(value) =>
                               setAdvancedSettings((prev) => ({
                                 ...prev,
-                                model: event.target.value,
+                                model: value,
                               }))
                             }
-                          >
-                            {MODEL_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </label>
                         <label className="field-row">
                           <span>随机种子</span>
@@ -887,21 +964,17 @@ export const CreatePage = () => {
                         </label>
                         <label className="field-row">
                           <span>分辨率</span>
-                          <select
+                          <SelectMenu
                             value={advancedSettings.resolution}
-                            onChange={(event) =>
+                            options={RESOLUTION_SELECT_OPTIONS}
+                            ariaLabel="分辨率"
+                            onChange={(value) =>
                               setAdvancedSettings((prev) => ({
                                 ...prev,
-                                resolution: event.target.value,
+                                resolution: value,
                               }))
                             }
-                          >
-                            {RESOLUTION_PRESETS.map((preset) => (
-                              <option key={preset.id} value={preset.id}>
-                                {preset.label}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </label>
                       </div>
                     )}

@@ -30,16 +30,16 @@ type WorkSummary = {
 };
 
 const durationOptions: FilterOption[] = [
-  { value: "any", label: "Any duration" },
-  { value: "short", label: "0-10s" },
-  { value: "medium", label: "10-30s" },
-  { value: "long", label: "30s+" },
+  { value: "any", label: "不限时长" },
+  { value: "short", label: "0-10秒" },
+  { value: "medium", label: "10-30秒" },
+  { value: "long", label: "30秒以上" },
 ];
 
 const dateOptions: FilterOption[] = [
-  { value: "any", label: "Any date" },
-  { value: "has", label: "Has date" },
-  { value: "none", label: "No date" },
+  { value: "any", label: "不限日期" },
+  { value: "has", label: "有日期" },
+  { value: "none", label: "无日期" },
 ];
 
 const truncate = (value: string, max = 64) =>
@@ -52,7 +52,7 @@ const toErrorMessage = (error: unknown) => {
   if (typeof error === "string") {
     return error;
   }
-  return "Failed to load manifest.";
+  return "加载清单失败。";
 };
 
 const getDuration = (manifest?: Manifest): number | undefined =>
@@ -150,7 +150,7 @@ export const LibraryPage = () => {
       const entry = manifestMap[item.jobId];
       const manifest = entry && entry.status === "ready" ? entry.manifest : undefined;
       const prompt = manifest?.inputs?.raw_prompt;
-      const title = prompt ? truncate(prompt) : `Work ${item.jobId}`;
+      const title = prompt ? truncate(prompt) : `作品 ${item.jobId}`;
       return {
         jobId: item.jobId,
         title,
@@ -176,12 +176,12 @@ export const LibraryPage = () => {
         hasUnknown = true;
       }
     });
-    const options = [{ value: "all", label: "All styles" }];
+    const options = [{ value: "all", label: "全部风格" }];
     Array.from(styles)
       .sort((a, b) => a.localeCompare(b))
       .forEach((style) => options.push({ value: style, label: style }));
     if (hasUnknown) {
-      options.push({ value: "unknown", label: "Unknown" });
+      options.push({ value: "unknown", label: "未知" });
     }
     return options;
   }, [works]);
@@ -192,7 +192,7 @@ export const LibraryPage = () => {
     if (trimmedQuery) {
       chips.push({
         id: "query",
-        label: `Search: ${truncate(trimmedQuery, 32)}`,
+        label: `搜索：${truncate(trimmedQuery, 32)}`,
         onClear: () => setQuery(""),
       });
     }
@@ -201,7 +201,7 @@ export const LibraryPage = () => {
         styleOptions.find((option) => option.value === styleFilter)?.label ?? styleFilter;
       chips.push({
         id: "style",
-        label: `Style: ${styleLabel}`,
+        label: `风格：${styleLabel}`,
         onClear: () => setStyleFilter("all"),
       });
     }
@@ -211,7 +211,7 @@ export const LibraryPage = () => {
         durationFilter;
       chips.push({
         id: "duration",
-        label: `Duration: ${durationLabel}`,
+        label: `时长：${durationLabel}`,
         onClear: () => setDurationFilter("any"),
       });
     }
@@ -220,7 +220,7 @@ export const LibraryPage = () => {
         dateOptions.find((option) => option.value === dateFilter)?.label ?? dateFilter;
       chips.push({
         id: "date",
-        label: `Date: ${dateLabel}`,
+        label: `日期：${dateLabel}`,
         onClear: () => setDateFilter("any"),
       });
     }
@@ -286,10 +286,10 @@ export const LibraryPage = () => {
     <div className="page library-page">
       <header className="page-header library-header">
         <div className="library-title-block">
-          <h1 className="page-title">Library</h1>
-          <p className="page-subtitle">Recent works stored locally.</p>
+          <h1 className="page-title">我的作品</h1>
+          <p className="page-subtitle">本地保存的最近作品。</p>
         </div>
-        <div className="library-count">{filteredWorks.length} results</div>
+        <div className="library-count">共 {filteredWorks.length} 条</div>
       </header>
       <LibraryCommandBar
         query={query}
@@ -301,10 +301,10 @@ export const LibraryPage = () => {
       />
       {filteredWorks.length === 0 ? (
         <div className="library-empty">
-          <div className="library-empty-title">No matches yet</div>
-          <div className="library-empty-subtitle">Adjust filters or start a new creation.</div>
+          <div className="library-empty-title">暂无匹配结果</div>
+          <div className="library-empty-subtitle">调整筛选条件或开始新的创作。</div>
           <a className="library-empty-action" href="/">
-            Create new
+            开始创作
           </a>
         </div>
       ) : (

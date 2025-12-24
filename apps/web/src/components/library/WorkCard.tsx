@@ -20,7 +20,7 @@ const formatDuration = (value?: number) => {
     return "--";
   }
   const rounded = Math.round(value * 10) / 10;
-  return `${rounded}s`;
+  return `${rounded}秒`;
 };
 
 const formatDate = (value?: string) => {
@@ -32,6 +32,25 @@ const formatDate = (value?: string) => {
     return value;
   }
   return parsed.toLocaleString();
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  error: "错误",
+  loading: "加载中",
+  unknown: "未知",
+  queued: "排队中",
+  planning: "规划中",
+  running: "生成中",
+  running_motion: "动作生成",
+  running_scene: "场景生成",
+  running_music: "音乐生成",
+  composing_preview: "合成预览",
+  exporting_video: "导出中",
+  done: "完成",
+  completed: "完成",
+  success: "完成",
+  canceled: "已取消",
+  failed: "失败",
 };
 
 export const WorkCard = ({
@@ -53,14 +72,14 @@ export const WorkCard = ({
     () => (thumbnailUri ? getAssetUrl(thumbnailUri) : undefined),
     [thumbnailUri]
   );
-  const displayStyle = style || "default";
+  const displayStyle = style || "默认";
   const displayDuration = formatDuration(duration);
   const displayDate = formatDate(createdAt);
   const normalizedStatus = (status ?? "").toLowerCase();
   const rawStatus = error ? "error" : loading ? "loading" : normalizedStatus || "unknown";
-  const displayStatus = rawStatus
-    .replace(/_/g, " ")
-    .replace(/^\w/, (match) => match.toUpperCase());
+  const displayStatus =
+    STATUS_LABELS[rawStatus] ??
+    rawStatus.replace(/_/g, " ").replace(/^\w/, (match) => match.toUpperCase());
   const hasStatus = Boolean(error || loading || normalizedStatus);
   const statusTone = error
     ? "error"
@@ -101,7 +120,7 @@ export const WorkCard = ({
             />
           ) : (
             <div className="work-card-placeholder">
-              <div className="work-card-placeholder-inner">No preview</div>
+              <div className="work-card-placeholder-inner">暂无预览</div>
             </div>
           )}
         </div>
@@ -129,7 +148,7 @@ export const WorkCard = ({
         <button
           type="button"
           className="work-card-action-button"
-          aria-label="More actions"
+          aria-label="更多操作"
           aria-expanded={menuOpen}
           aria-haspopup="menu"
           onClick={(event) => {
@@ -152,7 +171,7 @@ export const WorkCard = ({
               onRemove(jobId);
             }}
           >
-            Remove
+            移除
           </button>
         </div>
       </div>

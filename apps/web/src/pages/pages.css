@@ -625,7 +625,7 @@ body {
   position: sticky;
   top: 24px;
   display: grid;
-  gap: 16px;
+  gap: 12px;
   padding: 18px;
   border-radius: 20px;
   border: 1px solid var(--border);
@@ -673,21 +673,21 @@ body {
 }
 
 .inspector-steps {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .inspector-step {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid rgba(45, 60, 82, 0.9);
   background: rgba(18, 26, 38, 0.9);
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
 }
 
 .inspector-step.active {
@@ -705,12 +705,12 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   border: 1px solid rgba(66, 82, 110, 0.8);
   background: rgba(22, 30, 44, 0.9);
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -728,11 +728,12 @@ body {
 
 .step-label {
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .inspector-body {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .inspector-callout {
@@ -746,7 +747,7 @@ body {
 
 .inspector-section {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .inspector-section-title {
@@ -846,7 +847,7 @@ body {
   background: transparent;
   border: 1px solid rgba(45, 60, 82, 0.9);
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   color: var(--text);
   cursor: pointer;
   transition: border-color var(--enter) var(--ease), background-color var(--enter) var(--ease);
@@ -862,12 +863,16 @@ body {
   height: 8px;
   border-right: 2px solid rgba(154, 176, 255, 0.8);
   border-bottom: 2px solid rgba(154, 176, 255, 0.8);
-  transform: rotate(45deg);
+  transform: rotate(135deg);
   transition: transform var(--enter) var(--ease);
 }
 
 .advanced-toggle[aria-expanded="true"] .advanced-toggle-icon {
-  transform: rotate(-135deg);
+  transform: rotate(-45deg);
+}
+
+.advanced-settings {
+  position: relative;
 }
 
 .advanced-panel {
@@ -877,6 +882,12 @@ body {
   border-radius: 12px;
   border: 1px solid rgba(45, 60, 82, 0.9);
   background: var(--surface-3);
+  position: absolute;
+  top: 0;
+  right: calc(100% + 12px);
+  width: 240px;
+  z-index: 3;
+  box-shadow: var(--shadow);
 }
 
 .field-row {
@@ -928,6 +939,107 @@ body {
 
 .field-row input::placeholder {
   color: var(--text-muted);
+}
+
+.select-menu {
+  position: relative;
+}
+
+.select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(60, 74, 94, 0.85);
+  background: rgba(14, 19, 28, 0.95);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease);
+}
+
+.select-trigger span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select-trigger:hover {
+  border-color: rgba(92, 110, 140, 0.9);
+}
+
+.select-trigger:focus-visible {
+  outline: none;
+  border-color: rgba(125, 167, 255, 0.7);
+  box-shadow: 0 0 0 2px rgba(125, 167, 255, 0.3);
+}
+
+.select-caret {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid rgba(154, 176, 255, 0.8);
+  border-bottom: 2px solid rgba(154, 176, 255, 0.8);
+  transform: rotate(45deg);
+  transition: transform var(--enter) var(--ease);
+}
+
+.select-menu.open .select-caret {
+  transform: rotate(-135deg);
+}
+
+.select-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(60, 74, 94, 0.9);
+  background: rgba(12, 18, 28, 0.98);
+  box-shadow: 0 12px 28px rgba(5, 10, 20, 0.35);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--enter) var(--ease), background-color var(--enter) var(--ease),
+    color var(--enter) var(--ease);
+}
+
+.select-option span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select-option:hover {
+  border-color: rgba(125, 167, 255, 0.5);
+  background: rgba(24, 33, 50, 0.85);
+  color: var(--text);
+}
+
+.select-option.active {
+  border-color: rgba(154, 176, 255, 0.7);
+  background: rgba(30, 40, 60, 0.9);
+  color: #e8edff;
 }
 
 .seed-field {
@@ -1376,6 +1488,21 @@ body {
   .create-chat {
     width: 100%;
     justify-self: stretch;
+  }
+
+  .advanced-panel {
+    position: static;
+    width: 100%;
+    margin-top: 8px;
+    box-shadow: none;
+  }
+
+  .advanced-toggle-icon {
+    transform: rotate(45deg);
+  }
+
+  .advanced-toggle[aria-expanded="true"] .advanced-toggle-icon {
+    transform: rotate(-135deg);
   }
 
   .chat-panel {
