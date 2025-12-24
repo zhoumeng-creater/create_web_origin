@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from .events import EventBus
 from .models import JobStatus
@@ -39,12 +39,14 @@ class ProgressReporter:
         job = self._store.update_job(self._job_id, **fields)
         if not job:
             return
+        progress_value = _progress_percent(job.progress)
         data: Dict[str, Any] = {
             "job_id": self._job_id,
             "status": job.status.value,
             "stage": job.stage,
-            "progress": job.progress,
+            "progress": progress_value,
             "message": job.message,
+            "stages": list(job.stages),
         }
         if payload is not None:
             data["payload"] = payload
@@ -58,7 +60,14 @@ class ProgressReporter:
         job = self._store.append_log(self._job_id, line)
         if not job:
             return
-        data = {"job_id": self._job_id, "line": line}
+        logs_tail = _logs_tail(job.logs)
+        data = {
+            "job_id": self._job_id,
+            "line": line,
+            "message": line,
+            "text": line,
+            "logs_tail": logs_tail,
+        }
         await self._event_bus.publish(self._job_id, "log", data)
 
     async def asset(
@@ -74,3 +83,21 @@ class ProgressReporter:
         if meta is not None:
             data["meta"] = meta
         await self._event_bus.publish(self._job_id, "asset", data)
+
+
+def _progress_percent(value: Any) -> float:
+    try:
+        progress = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if progress <= 1.0:
+        progress *= 100.0
+    return max(0.0, min(100.0, progress))
+
+
+def _logs_tail(lines: List[str], limit: int = 8) -> List[str]:
+    if limit <= 0:
+        return []
+    if len(lines) <= limit:
+        return list(lines)
+    return list(lines[-limit:])
