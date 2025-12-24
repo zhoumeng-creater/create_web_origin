@@ -218,6 +218,7 @@ export const CreatePage = () => {
   const assetsJobRef = useRef<string | null>(null);
   const chatThreadRef = useRef<HTMLUListElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatInputBoxRef = useRef<HTMLDivElement | null>(null);
   const advancedToggleRef = useRef<HTMLButtonElement | null>(null);
   const advancedPanelRef = useRef<HTMLDivElement | null>(null);
   const recentSaveRef = useRef<string>("");
@@ -452,6 +453,52 @@ export const CreatePage = () => {
       document.removeEventListener("mousedown", handlePointer);
     };
   }, [advancedOpen]);
+
+  useEffect(() => {
+    const textarea = inputRef.current;
+    const container = chatInputBoxRef.current;
+    if (!textarea || !container) {
+      return;
+    }
+    let frame: number | null = null;
+    const update = () => {
+      frame = null;
+      const { scrollTop, scrollHeight, clientHeight } = textarea;
+      const hasOverflow = scrollHeight > clientHeight + 1;
+      const trackHeight = clientHeight;
+      const thumbHeight = hasOverflow
+        ? Math.max(24, (clientHeight / scrollHeight) * trackHeight)
+        : 0;
+      const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+      const maxScrollTop = Math.max(1, scrollHeight - clientHeight);
+      const thumbTop = hasOverflow ? (scrollTop / maxScrollTop) * maxThumbTop : 0;
+      container.style.setProperty("--input-scroll-visible", hasOverflow ? "1" : "0");
+      container.style.setProperty("--input-scroll-thumb-height", `${thumbHeight}px`);
+      container.style.setProperty("--input-scroll-thumb-top", `${thumbTop}px`);
+    };
+    const schedule = () => {
+      if (frame !== null) {
+        return;
+      }
+      frame = requestAnimationFrame(update);
+    };
+    update();
+    textarea.addEventListener("scroll", schedule);
+    textarea.addEventListener("input", schedule);
+    window.addEventListener("resize", schedule);
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    resizeObserver?.observe(textarea);
+    return () => {
+      textarea.removeEventListener("scroll", schedule);
+      textarea.removeEventListener("input", schedule);
+      window.removeEventListener("resize", schedule);
+      resizeObserver?.disconnect();
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+    };
+  }, [draft]);
 
   useEffect(() => {
     const handler = () => {
@@ -890,7 +937,7 @@ export const CreatePage = () => {
                     </button>
                   ))}
                 </div>
-                <div className="chat-input-box">
+                <div className="chat-input-box" ref={chatInputBoxRef}>
                   <textarea
                     ref={inputRef}
                     value={draft}
@@ -904,6 +951,9 @@ export const CreatePage = () => {
                     placeholder="描述你的场景、光线、动作与配乐..."
                     rows={3}
                   />
+                  <div className="chat-input-scroll" aria-hidden="true">
+                    <div className="chat-input-scroll-thumb" />
+                  </div>
                   <button
                     type="submit"
                     className="send-button"

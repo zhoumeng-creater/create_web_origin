@@ -547,7 +547,10 @@ body {
   border-radius: 16px;
   border: 1px solid rgba(60, 74, 94, 0.85);
   background: rgba(14, 19, 28, 0.95);
-  padding: 12px 56px 48px 12px;
+  padding: 12px 0 48px 12px;
+  --input-scroll-visible: 0;
+  --input-scroll-thumb-height: 0px;
+  --input-scroll-thumb-top: 0px;
   transition: border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease),
     background-color var(--enter) var(--ease);
 }
@@ -566,13 +569,43 @@ body {
   border: none;
   background: transparent;
   color: var(--text);
-  padding: 0;
+  padding: 0 56px 0 0;
   font-family: inherit;
   font-size: 0.95rem;
   line-height: 1.5;
   resize: none;
   min-height: 88px;
   outline: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chat-input textarea::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.chat-input-scroll {
+  position: absolute;
+  top: 12px;
+  bottom: 48px;
+  right: 6px;
+  width: 6px;
+  border-radius: 999px;
+  opacity: var(--input-scroll-visible);
+  transition: opacity var(--enter) var(--ease);
+  pointer-events: none;
+}
+
+.chat-input-scroll-thumb {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--input-scroll-thumb-top);
+  height: var(--input-scroll-thumb-height);
+  border-radius: 999px;
+  background: rgba(125, 167, 255, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(12, 18, 28, 0.9), 0 6px 12px rgba(5, 10, 20, 0.35);
 }
 
 .chat-input-hint {
