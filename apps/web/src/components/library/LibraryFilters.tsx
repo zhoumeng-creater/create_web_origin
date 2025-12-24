@@ -1,7 +1,6 @@
-export type FilterOption = {
-  value: string;
-  label: string;
-};
+import { SelectMenu, type SelectOption } from "../ui/SelectMenu";
+
+export type FilterOption = SelectOption;
 
 type LibraryFiltersProps = {
   style: string;
@@ -31,33 +30,30 @@ export const LibraryFilters = ({
   <div className="library-filter-panel">
     <label className="library-filter-field">
       <span>风格</span>
-      <select value={style} onChange={(event) => onStyleChange(event.target.value)}>
-        {styleOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <SelectMenu
+        value={style}
+        options={styleOptions}
+        ariaLabel="风格"
+        onChange={onStyleChange}
+      />
     </label>
     <label className="library-filter-field">
       <span>时长</span>
-      <select value={duration} onChange={(event) => onDurationChange(event.target.value)}>
-        {durationOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <SelectMenu
+        value={duration}
+        options={durationOptions}
+        ariaLabel="时长"
+        onChange={onDurationChange}
+      />
     </label>
     <label className="library-filter-field">
       <span>日期</span>
-      <select value={date} onChange={(event) => onDateChange(event.target.value)}>
-        {dateOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <SelectMenu
+        value={date}
+        options={dateOptions}
+        ariaLabel="日期"
+        onChange={onDateChange}
+      />
     </label>
     <div className="library-filter-actions">
       <button type="button" className="library-filter-clear" onClick={onClear}>

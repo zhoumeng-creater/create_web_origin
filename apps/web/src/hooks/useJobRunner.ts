@@ -13,6 +13,8 @@ type JobRunnerState = {
   error: string | null;
   isStarting: boolean;
   start: () => Promise<void>;
+  subscribeExistingJob: (jobId: string) => Promise<void>;
+  reset: () => void;
   stop: () => void;
 };
 
@@ -224,6 +226,14 @@ export const useJobRunner = (
     setConnectionState("idle");
   }, [stopPolling]);
 
+  const reset = useCallback(() => {
+    stop();
+    setJobId(null);
+    setJobStatus(null);
+    setError(null);
+    setIsStarting(false);
+  }, [stop]);
+
   const handleEvent = useCallback((event: JobEvent) => {
     setJobStatus((prev) => applyEventToStatus(prev, event));
     if (event.type === "error") {
@@ -303,6 +313,54 @@ export const useJobRunner = (
     }
   }, [handleEvent, options, prompt, stop]);
 
+  const subscribeExistingJob = useCallback(
+    async (existingJobId: string) => {
+      const trimmed = existingJobId.trim();
+      if (!trimmed) {
+        return;
+      }
+      stop();
+      setIsStarting(false);
+      setError(null);
+      setJobStatus(null);
+      setJobId(trimmed);
+      setConnectionState("connecting");
+      tokenRef.current += 1;
+      const token = tokenRef.current;
+
+      try {
+        const status = await getJob(trimmed);
+        if (tokenRef.current === token) {
+          setJobStatus(status);
+        }
+      } catch (err) {
+        if (tokenRef.current === token) {
+          const message = err instanceof Error ? err.message : "Failed to load job";
+          setError(message);
+        }
+      }
+
+      subscriptionRef.current = subscribeJobEvents(
+        trimmed,
+        (event) => {
+          if (tokenRef.current !== token) {
+            return;
+          }
+          handleEvent(event);
+        },
+        {
+          onConnectionChange: (state) => {
+            if (tokenRef.current !== token) {
+              return;
+            }
+            setConnectionState(state);
+          },
+        }
+      );
+    },
+    [handleEvent, stop]
+  );
+
   useEffect(() => {
     if (!jobId) {
       stopPolling();
@@ -330,6 +388,8 @@ export const useJobRunner = (
     error,
     isStarting,
     start,
+    subscribeExistingJob,
+    reset,
     stop,
   };
 };
