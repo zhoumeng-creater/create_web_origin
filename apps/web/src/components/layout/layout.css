@@ -1,0 +1,33 @@
+.app-shell {
+  --bg: #0a0e14;
+  --bg-soft: #0f141c;
+  --surface: #101621;
+  --surface-2: #151c26;
+  --surface-3: #1a2230;
+  --border: #263244;
+  --border-strong: #334158;
+  --accent: #9ab0ff;
+  --accent-strong: #d3ddff;
+  --text: #e5e7eb;
+  --text-muted: #9aa4b2;
+  --enter: 180ms;
+  --exit: 120ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --shadow: 0 18px 40px rgba(5, 10, 20, 0.35);
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Space Grotesk", "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    flex-direction: column;
+  }
+}

@@ -105,31 +105,22 @@
   color: #a3adc2;
 }
 
-.three-preview-speed select {
+.three-preview-speed .select-trigger {
   background: #151c26;
   color: var(--text);
   border: 1px solid #2a3544;
   border-radius: 8px;
   padding: 4px 8px;
-  font-family: inherit;
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  background-image: var(--select-arrow);
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 12px 8px;
-  padding-right: 28px;
-  cursor: pointer;
+  font-size: 0.8rem;
   transition: border-color var(--enter) var(--ease), box-shadow var(--enter) var(--ease),
     background-color var(--enter) var(--ease);
 }
 
-.three-preview-speed select:hover {
+.three-preview-speed .select-trigger:hover {
   border-color: #3a4a63;
 }
 
-.three-preview-speed select:focus-visible {
+.three-preview-speed .select-trigger:focus-visible {
   outline: none;
   border-color: rgba(154, 176, 255, 0.7);
   box-shadow: 0 0 0 2px rgba(93, 114, 186, 0.35);
@@ -142,7 +133,7 @@
   min-width: 0;
   max-width: 0;
   opacity: 0;
-  overflow: hidden;
+  overflow: visible;
   pointer-events: none;
   transform: translateY(4px);
   transition: max-width var(--enter) var(--ease), opacity var(--enter) var(--ease),

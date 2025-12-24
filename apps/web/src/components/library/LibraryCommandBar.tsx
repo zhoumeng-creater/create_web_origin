@@ -39,6 +39,7 @@ export const LibraryCommandBar = ({
         onClick={onOpenFilters}
         aria-expanded={isFiltersOpen}
         aria-controls="library-filters-drawer"
+        data-filter-trigger="library-filters"
       >
         <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
           <path

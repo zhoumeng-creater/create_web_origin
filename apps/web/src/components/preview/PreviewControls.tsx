@@ -1,5 +1,7 @@
 import type { ChangeEvent } from "react";
 
+import { SelectMenu, type SelectOption } from "../ui/SelectMenu";
+
 type PreviewControlsProps = {
   playing: boolean;
   currentTime: number;
@@ -15,6 +17,11 @@ type PreviewControlsProps = {
 };
 
 const speedOptions = [0.5, 1, 1.5, 2];
+
+const SPEED_SELECT_OPTIONS: SelectOption[] = speedOptions.map((value) => ({
+  value: String(value),
+  label: `${value}x`,
+}));
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -52,13 +59,6 @@ export const PreviewControls = ({
     }
   };
 
-  const handleSpeedChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextSpeed = Number(event.target.value);
-    if (Number.isFinite(nextSpeed)) {
-      onSpeedChange(nextSpeed);
-    }
-  };
-
   return (
     <div className="three-preview-controls">
       <button
@@ -90,13 +90,17 @@ export const PreviewControls = ({
       <div className="three-preview-advanced">
         <label className="three-preview-speed">
           <span>Speed</span>
-          <select value={speed} onChange={handleSpeedChange}>
-            {speedOptions.map((value) => (
-              <option key={value} value={value}>
-                {value}x
-              </option>
-            ))}
-          </select>
+          <SelectMenu
+            value={String(speed)}
+            options={SPEED_SELECT_OPTIONS}
+            ariaLabel="Speed"
+            onChange={(next) => {
+              const nextSpeed = Number(next);
+              if (Number.isFinite(nextSpeed)) {
+                onSpeedChange(nextSpeed);
+              }
+            }}
+          />
         </label>
         <button
           type="button"

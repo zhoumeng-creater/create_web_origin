@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { PreviewPanel } from "../components/preview/PreviewPanel";
+import { SelectMenu, type SelectOption } from "../components/ui/SelectMenu";
 import { useWorkDetail } from "../hooks/useWorkDetail";
 import { getAssetUrl } from "../lib/api";
 import type { Manifest } from "../types/manifest";
@@ -59,6 +60,24 @@ const ASSET_SPECS: Array<
     kind: "bundle",
     getUri: (manifest) => manifest?.outputs?.export?.zip?.uri,
   },
+];
+
+const RESOLUTION_OPTIONS: SelectOption[] = [
+  { value: "720p", label: "1280 x 720" },
+  { value: "1080p", label: "1920 x 1080" },
+  { value: "4k", label: "3840 x 2160" },
+];
+
+const FPS_OPTIONS: SelectOption[] = [
+  { value: "24", label: "24 fps" },
+  { value: "30", label: "30 fps" },
+  { value: "60", label: "60 fps" },
+];
+
+const CAMERA_OPTIONS: SelectOption[] = [
+  { value: "orbit", label: "Orbit" },
+  { value: "static", label: "Static" },
+  { value: "tracking", label: "Tracking" },
 ];
 
 const buildAssets = (manifest?: Manifest): AssetItem[] =>
@@ -389,33 +408,25 @@ export const WorkDetailPage = ({ jobId }: WorkDetailPageProps) => {
               <div className="work-detail-export-form">
                 <label>
                   <span>Resolution</span>
-                  <select
+                  <SelectMenu
                     value={resolution}
-                    onChange={(event) => setResolution(event.target.value)}
-                  >
-                    <option value="720p">1280 x 720</option>
-                    <option value="1080p">1920 x 1080</option>
-                    <option value="4k">3840 x 2160</option>
-                  </select>
+                    options={RESOLUTION_OPTIONS}
+                    ariaLabel="Resolution"
+                    onChange={setResolution}
+                  />
                 </label>
                 <label>
                   <span>Frame rate</span>
-                  <select value={fps} onChange={(event) => setFps(event.target.value)}>
-                    <option value="24">24 fps</option>
-                    <option value="30">30 fps</option>
-                    <option value="60">60 fps</option>
-                  </select>
+                  <SelectMenu value={fps} options={FPS_OPTIONS} ariaLabel="Frame rate" onChange={setFps} />
                 </label>
                 <label>
                   <span>Camera preset</span>
-                  <select
+                  <SelectMenu
                     value={cameraPreset}
-                    onChange={(event) => setCameraPreset(event.target.value)}
-                  >
-                    <option value="orbit">Orbit</option>
-                    <option value="static">Static</option>
-                    <option value="tracking">Tracking</option>
-                  </select>
+                    options={CAMERA_OPTIONS}
+                    ariaLabel="Camera preset"
+                    onChange={setCameraPreset}
+                  />
                 </label>
                 <button type="button" className="work-detail-export-button" disabled>
                   Export (backend pending)

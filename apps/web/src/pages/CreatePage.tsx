@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NavLink } from "react-router-dom";
-
 import { PreviewPanel } from "../components/preview/PreviewPanel";
+import { SelectMenu, type SelectOption } from "../components/ui/SelectMenu";
 import { useJobRunner } from "../hooks/useJobRunner";
-import { useRecentWorks } from "../hooks/useRecentWorks";
 import { fetchManifest, fetchPreviewConfig, getAssetUrl } from "../lib/api";
-import { saveRecentWork } from "../lib/storage";
+import {
+  getActiveSessionId,
+  getSessionDetail,
+  onSessionsUpdate,
+  saveRecentWork,
+  saveSessionDetail,
+  setActiveSessionId,
+  updateSessionIndex,
+  type SessionDetail,
+  type SessionStatus,
+} from "../lib/storage";
 import type { Manifest } from "../types/manifest";
 import type { PreviewConfig } from "../types/previewConfig";
 import "./pages.css";
@@ -15,11 +23,6 @@ type ChatMessage = {
   id: string;
   role: MessageRole;
   content: string;
-};
-
-type SelectOption = {
-  value: string;
-  label: string;
 };
 
 type InspectorStage = "choosing_options" | "running" | "complete";
@@ -82,6 +85,11 @@ const EXPORT_PRESETS = [
   { value: "mp4_4k", label: "4K（3840×2160）" },
 ];
 
+const EXPORT_SELECT_OPTIONS: SelectOption[] = EXPORT_PRESETS.map((preset) => ({
+  value: preset.value,
+  label: preset.label,
+}));
+
 const STAGE_LABELS: Record<string, string> = {
   QUEUED: "排队中",
   PLANNING: "规划",
@@ -113,6 +121,16 @@ const INSPECTOR_TABS = [
   { id: "export", label: "导出" },
 ] as const;
 
+const DEFAULT_DURATION = 14;
+const DEFAULT_ADVANCED_SETTINGS = {
+  model: MODEL_OPTIONS[0].value,
+  seed: "",
+  resolution: RESOLUTION_PRESETS[0].id,
+};
+const DEFAULT_EXPORT_PRESET = EXPORT_PRESETS[1]?.value ?? EXPORT_PRESETS[0].value;
+const DEFAULT_INSPECTOR_STAGE: InspectorStage = "choosing_options";
+const DEFAULT_ACTIVE_TAB: InspectorTab = "preview";
+
 const TEMPLATE_SNIPPETS = [
   { id: "action", label: "动作", template: "动作：" },
   { id: "shot", label: "镜头", template: "镜头：" },
@@ -120,9 +138,53 @@ const TEMPLATE_SNIPPETS = [
   { id: "duration", label: "时长", template: "时长：" },
 ];
 
-const MAX_RECENT_ITEMS = 10;
 
 const createMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const createSessionId = () =>
+  `sess_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+const mapJobStatusToSessionStatus = (
+  status?: string,
+  error?: string | null
+): SessionStatus => {
+  if (error) {
+    return "error";
+  }
+  const normalized = status?.toUpperCase() ?? "";
+  if (!normalized) {
+    return "draft";
+  }
+  if (normalized === "QUEUED") {
+    return "queued";
+  }
+  if (normalized === "DONE" || normalized === "COMPLETED") {
+    return "done";
+  }
+  if (normalized === "FAILED" || normalized === "ERROR") {
+    return "error";
+  }
+  return "running";
+};
+
+const buildDefaultSessionDetail = (sessionId: string, createdAt: string): SessionDetail => ({
+  id: sessionId,
+  createdAt,
+  updatedAt: createdAt,
+  status: "draft",
+  messages: INITIAL_MESSAGES,
+  draft: "",
+  options: {
+    style: STYLE_OPTIONS[0].id,
+    mood: MOOD_OPTIONS[0].id,
+    duration: DEFAULT_DURATION,
+    advancedSettings: DEFAULT_ADVANCED_SETTINGS,
+    exportPreset: DEFAULT_EXPORT_PRESET,
+  },
+  ui: {
+    inspectorStage: DEFAULT_INSPECTOR_STAGE,
+    activeTab: DEFAULT_ACTIVE_TAB,
+  },
+});
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -133,104 +195,38 @@ const INITIAL_MESSAGES: ChatMessage[] = [
   },
 ];
 
-type SelectMenuProps = {
-  value: string;
-  options: SelectOption[];
-  ariaLabel: string;
-  onChange: (value: string) => void;
-};
-
-const SelectMenu = ({ value, options, ariaLabel, onChange }: SelectMenuProps) => {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const selected = options.find((option) => option.value === value);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const handlePointer = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (menuRef.current && !menuRef.current.contains(target)) {
-        setOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handlePointer);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointer);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
-
-  return (
-    <div className={`select-menu${open ? " open" : ""}`} ref={menuRef}>
-      <button
-        type="button"
-        className="select-trigger"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-      >
-        <span>{selected?.label ?? "请选择"}</span>
-        <span className="select-caret" aria-hidden="true" />
-      </button>
-      {open && (
-        <div className="select-panel" role="listbox" aria-label={ariaLabel}>
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`select-option${option.value === value ? " active" : ""}`}
-              role="option"
-              aria-selected={option.value === value}
-              onClick={() => {
-                onChange(option.value);
-                setOpen(false);
-              }}
-            >
-              <span>{option.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
 export const CreatePage = () => {
-  const { items: recentWorks } = useRecentWorks();
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [draft, setDraft] = useState("");
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
-  const [inspectorStage, setInspectorStage] = useState<InspectorStage>("choosing_options");
+  const [inspectorStage, setInspectorStage] = useState<InspectorStage>(DEFAULT_INSPECTOR_STAGE);
   const [selectedStyle, setSelectedStyle] = useState(STYLE_OPTIONS[0].id);
   const [selectedMood, setSelectedMood] = useState(MOOD_OPTIONS[0].id);
-  const [duration, setDuration] = useState(14);
+  const [duration, setDuration] = useState(DEFAULT_DURATION);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [advancedSettings, setAdvancedSettings] = useState({
-    model: MODEL_OPTIONS[0].value,
-    seed: "",
-    resolution: RESOLUTION_PRESETS[0].id,
-  });
-  const [exportPreset, setExportPreset] = useState(EXPORT_PRESETS[1]?.value ?? EXPORT_PRESETS[0].value);
-  const [activeTab, setActiveTab] = useState<InspectorTab>("preview");
+  const [advancedSettings, setAdvancedSettings] = useState(DEFAULT_ADVANCED_SETTINGS);
+  const [exportPreset, setExportPreset] = useState(DEFAULT_EXPORT_PRESET);
+  const [activeTab, setActiveTab] = useState<InspectorTab>(DEFAULT_ACTIVE_TAB);
   const [toolMessageId, setToolMessageId] = useState<string | null>(null);
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [previewConfig, setPreviewConfig] = useState<PreviewConfig | null>(null);
   const [previewConfigMissing, setPreviewConfigMissing] = useState(false);
   const [assetError, setAssetError] = useState<string | null>(null);
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionCreatedAt, setSessionCreatedAt] = useState<string>("");
   const assetsJobRef = useRef<string | null>(null);
   const chatThreadRef = useRef<HTMLUListElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatInputBoxRef = useRef<HTMLDivElement | null>(null);
+  const advancedToggleRef = useRef<HTMLButtonElement | null>(null);
+  const advancedPanelRef = useRef<HTMLDivElement | null>(null);
   const recentSaveRef = useRef<string>("");
+  const sessionInitRef = useRef(false);
+  const lastSessionStatusRef = useRef<string | null>(null);
+  const sessionJobIdRef = useRef<string | null>(null);
+  const lastJobIdRef = useRef<string | null>(null);
+  const sessionSwitchRef = useRef(false);
 
   const latestPrompt = useMemo(() => {
     const match = [...messages].reverse().find((message) => message.role === "user");
@@ -285,7 +281,8 @@ export const CreatePage = () => {
     error: jobError,
     isStarting,
     start: startJob,
-    stop,
+    subscribeExistingJob,
+    reset: resetJobRunner,
   } = useJobRunner(latestPrompt, jobOptions);
 
   const insertTemplate = useCallback(
@@ -321,21 +318,213 @@ export const CreatePage = () => {
     });
   }, []);
 
-  const handleNewProject = useCallback(() => {
-    stop();
-    setMessages(INITIAL_MESSAGES);
-    setDraft("");
+  const buildSessionDetail = useCallback(
+    (overrides: Partial<SessionDetail> = {}): SessionDetail => {
+      const now = new Date().toISOString();
+      const resolvedId = overrides.id ?? sessionId ?? createSessionId();
+      const createdAt = overrides.createdAt ?? (sessionCreatedAt || now);
+      const resolvedLastPrompt =
+        overrides.lastPrompt ?? (latestPrompt.trim() ? latestPrompt.trim() : undefined);
+      return {
+        id: resolvedId,
+        createdAt,
+        updatedAt: overrides.updatedAt ?? now,
+        status: overrides.status ?? mapJobStatusToSessionStatus(jobStatus?.status, jobError),
+        jobId: overrides.jobId ?? jobId ?? undefined,
+        lastPrompt: resolvedLastPrompt,
+        messages: overrides.messages ?? messages,
+        draft: overrides.draft ?? draft,
+        options: overrides.options ?? {
+          style: selectedStyle,
+          mood: selectedMood,
+          duration,
+          advancedSettings,
+          exportPreset,
+        },
+        ui: overrides.ui ?? {
+          inspectorStage,
+          activeTab,
+        },
+      };
+    },
+    [
+      activeTab,
+      advancedSettings,
+      draft,
+      duration,
+      exportPreset,
+      inspectorStage,
+      jobError,
+      jobId,
+      jobStatus?.status,
+      latestPrompt,
+      messages,
+      selectedMood,
+      selectedStyle,
+      sessionCreatedAt,
+      sessionId,
+    ]
+  );
+
+  const resetJobSubscription = useCallback(() => {
+    resetJobRunner();
+    sessionJobIdRef.current = null;
+    lastSessionStatusRef.current = null;
+    lastJobIdRef.current = null;
+  }, [resetJobRunner]);
+
+  const applySessionDetail = useCallback((detail: SessionDetail) => {
+    setSessionId(detail.id);
+    setSessionCreatedAt(detail.createdAt);
+    setMessages(detail.messages.length > 0 ? detail.messages : INITIAL_MESSAGES);
+    setDraft(detail.draft);
+    setInspectorStage(detail.ui.inspectorStage);
+    setActiveTab(detail.ui.activeTab);
+    setSelectedStyle(detail.options.style);
+    setSelectedMood(detail.options.mood);
+    setDuration(detail.options.duration);
+    setAdvancedSettings(detail.options.advancedSettings);
+    setExportPreset(detail.options.exportPreset);
     setPendingPrompt(null);
     setToolMessageId(null);
-    setInspectorStage("choosing_options");
-    setActiveTab("preview");
     setManifest(null);
     setPreviewConfig(null);
     setPreviewConfigMissing(false);
     setAssetError(null);
     setIsLoadingAssets(false);
     assetsJobRef.current = null;
-  }, [stop]);
+  }, []);
+
+  const loadSessionById = useCallback(
+    (targetId: string | null) => {
+      sessionSwitchRef.current = true;
+      try {
+        if (sessionId && targetId !== sessionId) {
+          saveSessionDetail(buildSessionDetail());
+        }
+        resetJobSubscription();
+        if (targetId) {
+          const detail = getSessionDetail(targetId);
+          if (detail) {
+            applySessionDetail(detail);
+            if (detail.jobId) {
+              subscribeExistingJob(detail.jobId);
+            }
+            return;
+          }
+        }
+        const newId = createSessionId();
+        const now = new Date().toISOString();
+        const detail = buildDefaultSessionDetail(newId, now);
+        setActiveSessionId(newId);
+        saveSessionDetail(detail);
+        applySessionDetail(detail);
+      } finally {
+        sessionSwitchRef.current = false;
+      }
+    },
+    [applySessionDetail, buildSessionDetail, resetJobSubscription, sessionId, subscribeExistingJob]
+  );
+
+  useEffect(() => {
+    if (sessionInitRef.current) {
+      return;
+    }
+    sessionInitRef.current = true;
+    loadSessionById(getActiveSessionId());
+  }, [loadSessionById]);
+
+  useEffect(() => {
+    if (!advancedOpen) {
+      return;
+    }
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        (advancedPanelRef.current && advancedPanelRef.current.contains(target)) ||
+        (advancedToggleRef.current && advancedToggleRef.current.contains(target))
+      ) {
+        return;
+      }
+      setAdvancedOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointer);
+    return () => {
+      document.removeEventListener("mousedown", handlePointer);
+    };
+  }, [advancedOpen]);
+
+  useEffect(() => {
+    const textarea = inputRef.current;
+    const container = chatInputBoxRef.current;
+    if (!textarea || !container) {
+      return;
+    }
+    let frame: number | null = null;
+    const update = () => {
+      frame = null;
+      const { scrollTop, scrollHeight, clientHeight } = textarea;
+      const hasOverflow = scrollHeight > clientHeight + 1;
+      const trackHeight = clientHeight;
+      const thumbHeight = hasOverflow
+        ? Math.max(24, (clientHeight / scrollHeight) * trackHeight)
+        : 0;
+      const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+      const maxScrollTop = Math.max(1, scrollHeight - clientHeight);
+      const thumbTop = hasOverflow ? (scrollTop / maxScrollTop) * maxThumbTop : 0;
+      container.style.setProperty("--input-scroll-visible", hasOverflow ? "1" : "0");
+      container.style.setProperty("--input-scroll-thumb-height", `${thumbHeight}px`);
+      container.style.setProperty("--input-scroll-thumb-top", `${thumbTop}px`);
+    };
+    const schedule = () => {
+      if (frame !== null) {
+        return;
+      }
+      frame = requestAnimationFrame(update);
+    };
+    update();
+    textarea.addEventListener("scroll", schedule);
+    textarea.addEventListener("input", schedule);
+    window.addEventListener("resize", schedule);
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    resizeObserver?.observe(textarea);
+    return () => {
+      textarea.removeEventListener("scroll", schedule);
+      textarea.removeEventListener("input", schedule);
+      window.removeEventListener("resize", schedule);
+      resizeObserver?.disconnect();
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+    };
+  }, [draft]);
+
+  useEffect(() => {
+    const handler = () => {
+      if (sessionSwitchRef.current) {
+        return;
+      }
+      const activeId = getActiveSessionId();
+      if (activeId === sessionId) {
+        return;
+      }
+      loadSessionById(activeId);
+    };
+    return onSessionsUpdate(handler);
+  }, [loadSessionById, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    const timer = globalThis.setTimeout(() => {
+      saveSessionDetail(buildSessionDetail());
+    }, 400);
+    return () => {
+      globalThis.clearTimeout(timer);
+    };
+  }, [buildSessionDetail, sessionId]);
 
   const activeStepIndex =
     inspectorStage === "complete" ? 2 : inspectorStage === "running" ? 1 : 0;
@@ -448,16 +637,72 @@ export const CreatePage = () => {
     if (!trimmed) {
       return;
     }
-    setMessages((prev) => [
-      ...prev,
+    const now = new Date().toISOString();
+    const nextMessages: ChatMessage[] = [
+      ...messages,
       { id: createMessageId(), role: "user", content: trimmed },
       { id: createMessageId(), role: "system", content: "正在规划..." },
-    ]);
+    ];
+    setMessages(nextMessages);
+    if (sessionId) {
+      saveSessionDetail(
+        buildSessionDetail({
+          messages: nextMessages,
+          draft: "",
+          lastPrompt: trimmed,
+          updatedAt: now,
+          status: "draft",
+          ui: {
+            inspectorStage: DEFAULT_INSPECTOR_STAGE,
+            activeTab,
+          },
+        })
+      );
+    }
     setDraft("");
     setToolMessageId(null);
-    setInspectorStage("choosing_options");
+    setInspectorStage(DEFAULT_INSPECTOR_STAGE);
     setPendingPrompt(trimmed);
   };
+
+  useEffect(() => {
+    if (!jobId || jobId === lastJobIdRef.current) {
+      return;
+    }
+    if (!sessionId) {
+      return;
+    }
+    lastJobIdRef.current = jobId;
+    const now = new Date().toISOString();
+    const status = mapJobStatusToSessionStatus(jobStatus?.status, jobError);
+    const existing = getSessionDetail(sessionId);
+    const detail = existing
+      ? { ...existing, jobId, status, updatedAt: now }
+      : buildSessionDetail({ jobId, status, updatedAt: now });
+    saveSessionDetail(detail);
+    sessionJobIdRef.current = jobId;
+  }, [jobId, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    if (!jobId || sessionJobIdRef.current !== jobId) {
+      return;
+    }
+    const statusKey = jobError ? "ERROR" : jobStatus?.status;
+    if (!statusKey) {
+      return;
+    }
+    if (lastSessionStatusRef.current === statusKey) {
+      return;
+    }
+    lastSessionStatusRef.current = statusKey;
+    updateSessionIndex(sessionId, {
+      status: mapJobStatusToSessionStatus(statusKey, jobError),
+      updatedAt: new Date().toISOString(),
+    });
+  }, [jobError, jobStatus?.status, sessionId]);
 
   useEffect(() => {
     if (!toolMessageId || !toolMessageContent) {
@@ -568,7 +813,7 @@ export const CreatePage = () => {
           item.id === toolId ? { ...item, content: `创建失败：${message}` } : item
         )
       );
-      setInspectorStage("choosing_options");
+      setInspectorStage(DEFAULT_INSPECTOR_STAGE);
     }
   }, [hasPrompt, isJobActive, isStarting, startJob]);
 
@@ -628,7 +873,14 @@ export const CreatePage = () => {
       meta.previewUrl = previewUri;
     }
     saveRecentWork(jobId, meta);
-  }, [isJobDone, jobId, latestPrompt, manifest, previewConfig]);
+    if (sessionId && sessionJobIdRef.current === jobId) {
+      updateSessionIndex(sessionId, {
+        previewUrl: previewUri ?? undefined,
+        status: "done",
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }, [isJobDone, jobId, latestPrompt, manifest, previewConfig, sessionId]);
 
   const handleComplete = () => {
     setInspectorStage("complete");
@@ -638,70 +890,6 @@ export const CreatePage = () => {
   return (
     <div className="page create-page">
       <div className="create-shell">
-        <aside className="create-sidebar">
-          <div className="sidebar-brand">
-            <div className="brand-mark" aria-hidden="true" />
-            <div className="brand-body">
-              <div>
-                <div className="brand-title">Genesis Studio</div>
-                <div className="brand-subtitle">Creative Console</div>
-              </div>
-              <button type="button" className="sidebar-action" onClick={handleNewProject}>
-                新建项目
-              </button>
-            </div>
-          </div>
-          <nav className="sidebar-nav">
-            <NavLink end to="/" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              <span className="nav-dot" aria-hidden="true" />
-              创作
-            </NavLink>
-            <NavLink to="/works" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              <span className="nav-dot" aria-hidden="true" />
-              我的作品
-            </NavLink>
-          </nav>
-          <div className="sidebar-recent">
-            <div className="sidebar-panel-title">最近作品</div>
-            {recentWorks.length === 0 ? (
-              <div className="sidebar-recent-empty">暂无作品</div>
-            ) : (
-              <div className="sidebar-recent-list">
-                {recentWorks.slice(0, MAX_RECENT_ITEMS).map((work) => {
-                  const rawTitle =
-                    typeof work.meta.title === "string" ? work.meta.title.trim() : "";
-                  const title = rawTitle || `作品 ${work.jobId}`;
-                  const previewUrl =
-                    typeof work.meta.previewUrl === "string" ? work.meta.previewUrl : undefined;
-                  return (
-                    <NavLink
-                      key={work.jobId}
-                      to={`/works/${work.jobId}`}
-                      className="sidebar-recent-item"
-                    >
-                      <div className="sidebar-recent-thumb">
-                        {previewUrl ? (
-                          <img src={getAssetUrl(previewUrl)} alt={title} loading="lazy" />
-                        ) : (
-                          <div className="sidebar-recent-placeholder">暂无预览</div>
-                        )}
-                      </div>
-                      <div className="sidebar-recent-info">
-                        <div className="sidebar-recent-title">{title}</div>
-                      </div>
-                    </NavLink>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div className="sidebar-panel">
-            <div className="sidebar-panel-title">会话</div>
-            <div className="sidebar-panel-item">模型：Atlas-3 Preview</div>
-            <div className="sidebar-panel-item">模式：Storyboard</div>
-          </div>
-        </aside>
-
         <main className="create-chat">
           <div className="chat-header">
             <div className="chat-header-main">
@@ -749,7 +937,7 @@ export const CreatePage = () => {
                     </button>
                   ))}
                 </div>
-                <div className="chat-input-box">
+                <div className="chat-input-box" ref={chatInputBoxRef}>
                   <textarea
                     ref={inputRef}
                     value={draft}
@@ -763,6 +951,9 @@ export const CreatePage = () => {
                     placeholder="描述你的场景、光线、动作与配乐..."
                     rows={3}
                   />
+                  <div className="chat-input-scroll" aria-hidden="true">
+                    <div className="chat-input-scroll-thumb" />
+                  </div>
                   <button
                     type="submit"
                     className="send-button"
@@ -888,12 +1079,13 @@ export const CreatePage = () => {
                       aria-expanded={advancedOpen}
                       aria-controls="advanced-settings"
                       onClick={() => setAdvancedOpen((prev) => !prev)}
+                      ref={advancedToggleRef}
                     >
-                      高级设置
                       <span className="advanced-toggle-icon" aria-hidden="true" />
+                      <span className="advanced-toggle-label">高级设置</span>
                     </button>
                     {advancedOpen && (
-                      <div className="advanced-panel" id="advanced-settings">
+                      <div className="advanced-panel" id="advanced-settings" ref={advancedPanelRef}>
                         <label className="field-row">
                           <span>模型</span>
                           <SelectMenu
@@ -999,7 +1191,7 @@ export const CreatePage = () => {
                 <div className="inspector-progress">
                   <div className="progress-header">
                     <div>
-                      <div className="progress-title">生成中</div>
+                      <div className="progress-title">生成进度</div>
                       <div className="progress-subtitle">阶段：{progressStage}</div>
                       <div className="progress-meta">队列位置：{queueLabel}</div>
                     </div>
@@ -1063,7 +1255,7 @@ export const CreatePage = () => {
                             <PreviewPanel
                               jobId={jobId ?? undefined}
                               config={previewConfig}
-                              emptyMessage="预览配置已加载。"
+                              emptyMessage="预览配置已加载"
                             />
                           </div>
                         ) : (
@@ -1162,16 +1354,12 @@ export const CreatePage = () => {
                         <div className="export-settings">
                           <label className="export-field">
                             <span>导出预设</span>
-                            <select
+                            <SelectMenu
                               value={exportPreset}
-                              onChange={(event) => setExportPreset(event.target.value)}
-                            >
-                              {EXPORT_PRESETS.map((preset) => (
-                                <option key={preset.value} value={preset.value}>
-                                  {preset.label}
-                                </option>
-                              ))}
-                            </select>
+                              options={EXPORT_SELECT_OPTIONS}
+                              ariaLabel="导出预设"
+                              onChange={setExportPreset}
+                            />
                           </label>
                         </div>
                         <div className="export-actions">
@@ -1202,3 +1390,7 @@ export const CreatePage = () => {
     </div>
   );
 };
+
+
+
+
