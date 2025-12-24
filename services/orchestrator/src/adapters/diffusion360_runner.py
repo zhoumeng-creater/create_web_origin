@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import types
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -49,6 +51,10 @@ def _run() -> int:
     repo_root = model_root.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
+    os.environ.setdefault("NUMPY_EXPERIMENTAL_DTYPE_API", "1")
+    _patch_huggingface_hub()
+    _disable_xformers_if_requested()
+    _patch_torchvision_functional_tensor()
     try:
         import torch
         from txt2panoimg import Text2360PanoramaImagePipeline
@@ -100,6 +106,61 @@ def _run() -> int:
         _write_meta(Path(args.meta_out), meta)
 
     return 0
+
+
+def _patch_huggingface_hub() -> None:
+    try:
+        import huggingface_hub
+    except Exception:
+        return
+    if hasattr(huggingface_hub, "cached_download"):
+        return
+    if hasattr(huggingface_hub, "hf_hub_download"):
+        huggingface_hub.cached_download = huggingface_hub.hf_hub_download
+    elif hasattr(huggingface_hub, "snapshot_download"):
+        huggingface_hub.cached_download = huggingface_hub.snapshot_download
+
+
+def _disable_xformers_if_requested() -> None:
+    value = os.environ.get("DIFFUSION360_DISABLE_XFORMERS", "1").strip().upper()
+    if value not in {"1", "TRUE", "YES", "ON"}:
+        return
+    _disable_xformers_import()
+
+
+def _disable_xformers_import() -> None:
+    import importlib.util as importlib_util
+
+    if getattr(importlib_util.find_spec, "_diffusion360_patched", False):
+        return
+
+    original_find_spec = importlib_util.find_spec
+
+    def _patched_find_spec(name: str, package: str | None = None):
+        if name == "xformers":
+            return None
+        return original_find_spec(name, package)
+
+    _patched_find_spec._diffusion360_patched = True  # type: ignore[attr-defined]
+    importlib_util.find_spec = _patched_find_spec
+
+
+def _patch_torchvision_functional_tensor() -> None:
+    module_name = "torchvision.transforms.functional_tensor"
+    if module_name in sys.modules:
+        return
+    try:
+        import torchvision
+        from torchvision.transforms import functional as functional_api
+    except Exception:
+        return
+    if not hasattr(functional_api, "rgb_to_grayscale"):
+        return
+    shim = types.ModuleType(module_name)
+    shim.rgb_to_grayscale = functional_api.rgb_to_grayscale
+    sys.modules[module_name] = shim
+    if hasattr(torchvision, "transforms"):
+        setattr(torchvision.transforms, "functional_tensor", shim)
 
 
 def main() -> None:

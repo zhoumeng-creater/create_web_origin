@@ -217,6 +217,7 @@ export const CreatePage = () => {
   const [sessionCreatedAt, setSessionCreatedAt] = useState<string>("");
   const assetsJobRef = useRef<string | null>(null);
   const chatThreadRef = useRef<HTMLUListElement | null>(null);
+  const chatThreadWrapRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const chatInputBoxRef = useRef<HTMLDivElement | null>(null);
   const advancedToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -842,6 +843,50 @@ export const CreatePage = () => {
   }, [messages]);
 
   useEffect(() => {
+    const thread = chatThreadRef.current;
+    const wrapper = chatThreadWrapRef.current;
+    if (!thread || !wrapper) {
+      return;
+    }
+    let frame: number | null = null;
+    const update = () => {
+      frame = null;
+      const { scrollTop, scrollHeight, clientHeight } = thread;
+      const hasOverflow = scrollHeight > clientHeight + 1;
+      const trackHeight = clientHeight;
+      const thumbHeight = hasOverflow
+        ? Math.max(32, (clientHeight / scrollHeight) * trackHeight)
+        : 0;
+      const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+      const maxScrollTop = Math.max(1, scrollHeight - clientHeight);
+      const thumbTop = hasOverflow ? (scrollTop / maxScrollTop) * maxThumbTop : 0;
+      wrapper.style.setProperty("--thread-scroll-visible", hasOverflow ? "1" : "0");
+      wrapper.style.setProperty("--thread-scroll-thumb-height", `${thumbHeight}px`);
+      wrapper.style.setProperty("--thread-scroll-thumb-top", `${thumbTop}px`);
+    };
+    const schedule = () => {
+      if (frame !== null) {
+        return;
+      }
+      frame = requestAnimationFrame(update);
+    };
+    update();
+    thread.addEventListener("scroll", schedule);
+    window.addEventListener("resize", schedule);
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    resizeObserver?.observe(thread);
+    return () => {
+      thread.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      resizeObserver?.disconnect();
+      if (frame !== null) {
+        cancelAnimationFrame(frame);
+      }
+    };
+  }, [messages]);
+
+  useEffect(() => {
     if (!jobId || !isJobDone) {
       return;
     }
@@ -909,13 +954,18 @@ export const CreatePage = () => {
           </div>
 
           <div className="chat-panel">
-            <ul className="chat-thread" ref={chatThreadRef}>
-              {messages.map((message) => (
-                <li key={message.id} className={`chat-message chat-message-${message.role}`}>
-                  <div className="chat-message-content">{message.content}</div>
-                </li>
-              ))}
-            </ul>
+            <div className="chat-thread-wrap" ref={chatThreadWrapRef}>
+              <ul className="chat-thread" ref={chatThreadRef}>
+                {messages.map((message) => (
+                  <li key={message.id} className={`chat-message chat-message-${message.role}`}>
+                    <div className="chat-message-content">{message.content}</div>
+                  </li>
+                ))}
+              </ul>
+              <div className="chat-thread-scroll" aria-hidden="true">
+                <div className="chat-thread-scroll-thumb" />
+              </div>
+            </div>
 
             <form
               className="chat-input"

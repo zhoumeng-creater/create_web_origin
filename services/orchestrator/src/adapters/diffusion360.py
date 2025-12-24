@@ -298,7 +298,10 @@ def _resolve_diffusion_python() -> Optional[str]:
 
 
 def _build_runner_env(cuda_visible: Optional[str], use_wsl: bool) -> Dict[str, str]:
-    env_overrides: Dict[str, str] = {"PYTHONIOENCODING": "utf-8"}
+    env_overrides: Dict[str, str] = {
+        "PYTHONIOENCODING": "utf-8",
+        "NUMPY_EXPERIMENTAL_DTYPE_API": "1",
+    }
     python_paths = [str(_SD360_ROOT)]
     existing = os.environ.get("PYTHONPATH")
     if existing:

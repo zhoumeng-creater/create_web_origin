@@ -199,12 +199,13 @@ class FfmpegExportAdapter(BaseAdapter):
         render_python = _resolve_render_python()
         use_wsl = should_use_wsl(render_python)
         render_env = _build_render_env(use_wsl=use_wsl)
+        render_ffmpeg_bin = _resolve_render_ffmpeg_bin(use_wsl=use_wsl)
         render_cmd = _build_motion_render_cmd(
             render_python,
             motion_npy_path.parent,
             render_dir,
             fps,
-            ffmpeg_bin,
+            render_ffmpeg_bin,
             use_wsl=use_wsl,
         )
         run_env = render_env
@@ -440,7 +441,7 @@ def _build_composite_cmd(
 ) -> List[str]:
     overlay_height = max(1, int(height * 0.45))
     bg_filter = (
-        f"scale={width}:{height}:force_original_aspect_ratio=cover,"
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height}"
     )
     fg_filter = f"scale=-2:{overlay_height}"
@@ -484,7 +485,15 @@ def _build_composite_cmd(
     if bitrate:
         cmd += ["-b:v", bitrate]
     if music_path is not None:
-        cmd += ["-map", "2:a", "-c:a", "aac", "-shortest"]
+        cmd += [
+            "-map",
+            "2:a",
+            "-af",
+            "aformat=channel_layouts=stereo",
+            "-c:a",
+            "aac",
+            "-shortest",
+        ]
     else:
         cmd += ["-an"]
     cmd.append(str(output_path))
@@ -522,6 +531,20 @@ def _resolve_ffmpeg_bin() -> Optional[Path]:
     found = shutil.which("ffmpeg.exe")
     if found:
         return Path(found)
+    return None
+
+
+def _resolve_render_ffmpeg_bin(*, use_wsl: bool) -> Optional[Path]:
+    if not use_wsl:
+        return _resolve_ffmpeg_bin()
+    env_path = os.getenv("FFMPEG_BIN_WSL")
+    if env_path:
+        return Path(env_path)
+    distro = wsl_distro()
+    for prefix in (r"\\wsl$\\" + distro, r"\\wsl.localhost\\" + distro):
+        candidate = Path(prefix) / "usr" / "bin" / "ffmpeg"
+        if candidate.exists():
+            return candidate
     return None
 
 

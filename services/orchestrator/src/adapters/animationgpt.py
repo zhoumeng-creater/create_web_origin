@@ -625,7 +625,6 @@ def _convert_npy_to_bvh(
     if joints.ndim != 3 or joints.shape[-1] != 3:
         raise ValueError(f"unexpected motion shape: {joints.shape}")
 
-    module = _load_joints2bvh_module()
     iterations = int(quality_settings.get("iterations", 10))
     foot_ik = bool(quality_settings.get("foot_ik", False))
     _log_line(
@@ -633,6 +632,7 @@ def _convert_npy_to_bvh(
         f"[convert] quality={quality} iterations={iterations} foot_ik={foot_ik}",
     )
     with _temp_sys_path(_NPY_TO_BVH_DIR), _pushd(_NPY_TO_BVH_DIR):
+        module = _load_joints2bvh_module()
         with redirect_stdout(log_handle), redirect_stderr(log_handle):
             converter = module.Joint2BVHConvertor()
             anim, _ = converter.convert(

@@ -23,6 +23,12 @@ def get_runtime_paths() -> RuntimePaths:
     runtime_dir = Path(
         os.getenv("ORCH_RUNTIME_DIR", str(_DEFAULT_RUNTIME_DIR))
     ).expanduser()
+    if not runtime_dir.is_absolute():
+        runtime_dir = _REPO_ROOT / runtime_dir
+    try:
+        runtime_dir = runtime_dir.resolve()
+    except OSError:
+        runtime_dir = runtime_dir.absolute()
     assets_dir = runtime_dir / "assets"
     cache_dir = runtime_dir / "cache"
     logs_dir = runtime_dir / "logs"
