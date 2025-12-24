@@ -4,6 +4,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api.router import router as api_router
+from .api.ws import router as ws_router
 from .config.runtime import get_runtime_paths
 
 
@@ -20,6 +21,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router, prefix="/api")
+    app.include_router(ws_router)
 
     runtime_paths = get_runtime_paths()
     app.mount("/assets", StaticFiles(directory=runtime_paths.assets_dir), name="assets")

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from .models import Job, JobStatus
 from ..config.runtime import get_runtime_paths
+from ..planner import plan_stages
 from ..storage.job_fs import ensure_job_dirs, write_uir
 from ..storage.manifest import make_asset_url, write_manifest
 from ..uir import parse_uir, stable_hash
@@ -19,6 +20,27 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _coerce_job_id(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped if stripped else None
+    return None
+
+
+def _ensure_job_metadata(payload: Dict[str, Any], job_id: str) -> Dict[str, Any]:
+    enriched = dict(payload)
+    job = enriched.get("job")
+    if not isinstance(job, dict):
+        job = {}
+    if not _coerce_job_id(job.get("id")):
+        job["id"] = job_id
+    created_at = job.get("created_at")
+    if not created_at or (isinstance(created_at, str) and not created_at.strip()):
+        job["created_at"] = _now().isoformat()
+    enriched["job"] = job
+    return enriched
+
+
 class JobStore:
     def __init__(self, max_log_lines: int = 200) -> None:
         self._jobs: Dict[str, Job] = {}
@@ -26,18 +48,24 @@ class JobStore:
         self._max_log_lines = max_log_lines
 
     def create_job(self, uir: Dict[str, Any]) -> Job:
-        uir_model = parse_uir(uir)
-        uir_payload = json.loads(uir_model.json(by_alias=True, exclude_none=True))
-        job_id = uuid4().hex
-        job_section = uir_payload.get("job")
+        if not isinstance(uir, dict):
+            raise ValueError("UIR payload must be a JSON object")
+        supplied_id = None
+        job_section = uir.get("job") if isinstance(uir, dict) else None
         if isinstance(job_section, dict):
-            job_section["id"] = job_id
-        uir_digest = stable_hash(uir_payload)
+            supplied_id = _coerce_job_id(job_section.get("id"))
+        job_id = supplied_id or uuid4().hex
+        uir_model = parse_uir(_ensure_job_metadata(uir, job_id))
+        uir_payload = json.loads(uir_model.json(by_alias=True, exclude_none=True))
+        job_id = _coerce_job_id(uir_payload.get("job", {}).get("id")) or job_id
+        uir_digest = stable_hash(uir_model)
+        stage_plan = plan_stages(uir_payload)
         job = Job(
             job_id=job_id,
             uir=uir_payload,
             uir_hash=uir_digest,
             status=JobStatus.QUEUED,
+            stages=stage_plan,
         )
         runtime_paths = get_runtime_paths()
         job_dir = ensure_job_dirs(runtime_paths.assets_dir, job_id)

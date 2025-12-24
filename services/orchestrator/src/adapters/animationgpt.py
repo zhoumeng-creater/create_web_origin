@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -13,11 +14,19 @@ from typing import Any, Dict, List, Optional, Tuple
 from .base import AdapterResult, BaseAdapter, ProgressReporter, build_asset_ref, build_error
 from ..config.runtime import get_runtime_paths
 from ..uir.validate import validate_uir
+from ..utils.wsl import build_wsl_command, should_use_wsl, to_wsl_path, wsl_distro
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_ANIMATIONGPT_ROOT = _REPO_ROOT / "third_party" / "AnimationGPT"
-_DEMO_SCRIPT = _ANIMATIONGPT_ROOT / "demo.py"
-_CFG_PATH = _ANIMATIONGPT_ROOT / "config_AGPT.yaml"
+_ANIMATIONGPT_ROOT = Path(
+    os.getenv(
+        "ANIMATIONGPT_ROOT", str(_REPO_ROOT / "third_party" / "AnimationGPT")
+    )
+)
+_MOTIONGPT_ROOT = Path(
+    os.getenv("MOTIONGPT_ROOT", str(_ANIMATIONGPT_ROOT / "algorithm" / "MotionGPT"))
+)
+_DEMO_SCRIPT = _MOTIONGPT_ROOT / "demo.py"
+_CFG_PATH = _MOTIONGPT_ROOT / "config_AGPT.yaml"
 _NPY_TO_BVH_DIR = _ANIMATIONGPT_ROOT / "tools" / "npy2bvh"
 _JOINTS2BVH_PATH = _NPY_TO_BVH_DIR / "joints2bvh.py"
 
@@ -159,21 +168,27 @@ class AnimationGPTAdapter(BaseAdapter):
                         retryable=False,
                     ),
                 )
-            demo_env = _build_demo_env(uir)
-            demo_cmd = [
-                sys.executable,
-                str(_DEMO_SCRIPT),
-                "--cfg",
-                str(_CFG_PATH),
-                "--example",
-                str(example_path),
-            ]
+            demo_python = _resolve_python_exe()
+            use_wsl = should_use_wsl(demo_python)
+            demo_env = _build_demo_env(uir, use_wsl=use_wsl)
+            demo_cmd = _build_demo_cmd(demo_python, example_path, use_wsl=use_wsl)
+            run_env = demo_env
+            demo_cwd: Optional[Path] = _MOTIONGPT_ROOT
+            if use_wsl:
+                demo_cmd = build_wsl_command(
+                    demo_cmd,
+                    env=demo_env,
+                    distro=wsl_distro(),
+                    cwd=to_wsl_path(_MOTIONGPT_ROOT),
+                )
+                run_env = os.environ.copy()
+                demo_cwd = None
             _log_line(log_handle, "[running] " + " ".join(demo_cmd))
             timeout_s = _timeout_from_uir(uir)
             demo_result = _run_subprocess(
                 demo_cmd,
-                cwd=_ANIMATIONGPT_ROOT,
-                env=demo_env,
+                cwd=demo_cwd,
+                env=run_env,
                 log_handle=log_handle,
                 timeout_s=timeout_s,
             )
@@ -215,6 +230,22 @@ class AnimationGPTAdapter(BaseAdapter):
                         "E_IO_WRITE",
                         "AnimationGPT output not found",
                         detail={"error": str(exc)},
+                        retryable=True,
+                    ),
+                )
+
+            motion_npy_path = output_dir / "motion_out.npy"
+            try:
+                shutil.copyfile(npy_path, motion_npy_path)
+            except OSError as exc:
+                _log_line(log_handle, f"[io] {exc}")
+                return _error_result(
+                    self.provider_id,
+                    warnings,
+                    build_error(
+                        "E_IO_WRITE",
+                        "failed to copy motion npy",
+                        detail={"path": str(motion_npy_path), "error": str(exc)},
                         retryable=True,
                     ),
                 )
@@ -302,6 +333,9 @@ class AnimationGPTAdapter(BaseAdapter):
 
             artifacts = [
                 build_asset_ref(bvh_path, job_id, "motion_bvh", "text/plain"),
+                build_asset_ref(
+                    motion_npy_path, job_id, "motion_npy", "application/octet-stream"
+                ),
                 build_asset_ref(
                     meta_path, job_id, "motion_meta", "application/json"
                 ),
@@ -449,21 +483,43 @@ def _find_job_dir(out_dir: Path, job_id: str) -> Optional[Path]:
     return None
 
 
-def _build_demo_env(uir: Dict[str, Any]) -> Dict[str, str]:
-    env = dict(os.environ)
-    env["PYTHONIOENCODING"] = "utf-8"
+def _build_demo_env(uir: Dict[str, Any], *, use_wsl: bool) -> Dict[str, str]:
+    env_overrides: Dict[str, str] = {"PYTHONIOENCODING": "utf-8"}
     python_paths = [
-        str(_ANIMATIONGPT_ROOT / "algorithm" / "MotionGPT"),
+        str(_MOTIONGPT_ROOT),
         str(_ANIMATIONGPT_ROOT / "algorithm" / "HumanML3D"),
     ]
-    existing = env.get("PYTHONPATH")
+    existing = os.environ.get("PYTHONPATH")
     if existing:
-        python_paths.append(existing)
-    env["PYTHONPATH"] = os.pathsep.join(python_paths)
+        python_paths.extend(path for path in existing.split(os.pathsep) if path)
+    if use_wsl:
+        python_paths = [to_wsl_path(path) for path in python_paths]
+        env_overrides["PYTHONPATH"] = ":".join(python_paths)
+    else:
+        env_overrides["PYTHONPATH"] = os.pathsep.join(python_paths)
     gpu_lock = _gpu_lock_from_uir(uir)
     if gpu_lock is not None:
-        env["CUDA_VISIBLE_DEVICES"] = gpu_lock
+        env_overrides["CUDA_VISIBLE_DEVICES"] = gpu_lock
+    if use_wsl:
+        return env_overrides
+    env = dict(os.environ)
+    env.update(env_overrides)
     return env
+
+
+def _build_demo_cmd(
+    python_exe: str, example_path: Path, *, use_wsl: bool
+) -> List[str]:
+    python_bin = to_wsl_path(python_exe) if use_wsl else python_exe
+    path_mapper = to_wsl_path if use_wsl else str
+    return [
+        python_bin,
+        path_mapper(_DEMO_SCRIPT),
+        "--cfg",
+        path_mapper(_CFG_PATH),
+        "--example",
+        path_mapper(example_path),
+    ]
 
 
 def _gpu_lock_from_uir(uir: Dict[str, Any]) -> Optional[str]:
@@ -493,7 +549,7 @@ class _SubprocessResult:
 
 def _run_subprocess(
     cmd: List[str],
-    cwd: Path,
+    cwd: Optional[Path],
     env: Dict[str, str],
     log_handle: Any,
     timeout_s: Optional[float],
@@ -501,7 +557,7 @@ def _run_subprocess(
     try:
         completed = subprocess.run(
             cmd,
-            cwd=str(cwd),
+            cwd=str(cwd) if cwd is not None else None,
             env=env,
             stdout=log_handle,
             stderr=log_handle,
@@ -518,9 +574,10 @@ def _run_subprocess(
 def _find_latest_samples_dir(start_time: float) -> Path:
     threshold = start_time - 2.0
     search_roots = [
+        _MOTIONGPT_ROOT / "results",
+        _MOTIONGPT_ROOT / "output",
         _ANIMATIONGPT_ROOT / "results",
-        _ANIMATIONGPT_ROOT / "output",
-        _ANIMATIONGPT_ROOT,
+        _MOTIONGPT_ROOT,
     ]
     candidates: List[Tuple[float, Path]] = []
     for root in search_roots:
@@ -613,6 +670,8 @@ def _missing_dependencies() -> List[str]:
         missing.append(str(_DEMO_SCRIPT))
     if not _CFG_PATH.exists():
         missing.append(str(_CFG_PATH))
+    if not (_MOTIONGPT_ROOT / "mGPT.ckpt").exists():
+        missing.append(str(_MOTIONGPT_ROOT / "mGPT.ckpt"))
     if not _JOINTS2BVH_PATH.exists():
         missing.append(str(_JOINTS2BVH_PATH))
     return missing
@@ -645,3 +704,10 @@ def _pushd(path: Path) -> Any:
 def _log_line(handle: Any, line: str) -> None:
     handle.write(line.rstrip() + "\n")
     handle.flush()
+
+
+def _resolve_python_exe() -> str:
+    python_exe = os.getenv("ANIMATIONGPT_PYTHON") or os.getenv("PYTHON_EXE")
+    if python_exe:
+        return python_exe
+    return sys.executable

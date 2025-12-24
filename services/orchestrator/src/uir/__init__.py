@@ -1,3 +1,4 @@
+from .builder import build_uir_from_prompt
 from .hash import stable_hash, uir_hash
 from .models import (
     AssetRef,
@@ -37,6 +38,7 @@ __all__ = [
     "Scene",
     "UIR",
     "UIRValidationError",
+    "build_uir_from_prompt",
     "parse_uir",
     "stable_hash",
     "uir_hash",
