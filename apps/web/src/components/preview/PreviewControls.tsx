@@ -87,24 +87,26 @@ export const PreviewControls = ({
           {formatTime(clampedTime)} / {formatTime(safeDuration)}
         </div>
       </div>
-      <label className="three-preview-speed">
-        <span>Speed</span>
-        <select value={speed} onChange={handleSpeedChange}>
-          {speedOptions.map((value) => (
-            <option key={value} value={value}>
-              {value}x
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        className="three-preview-button"
-        onClick={onToggleMute}
-        aria-pressed={muted}
-      >
-        {muted ? "Unmute" : "Mute"}
-      </button>
+      <div className="three-preview-advanced">
+        <label className="three-preview-speed">
+          <span>Speed</span>
+          <select value={speed} onChange={handleSpeedChange}>
+            {speedOptions.map((value) => (
+              <option key={value} value={value}>
+                {value}x
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="three-preview-button three-preview-mute"
+          onClick={onToggleMute}
+          aria-pressed={muted}
+        >
+          {muted ? "Unmute" : "Mute"}
+        </button>
+      </div>
     </div>
   );
 };

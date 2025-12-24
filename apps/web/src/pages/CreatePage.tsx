@@ -1,71 +1,1203 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NavLink } from "react-router-dom";
 
 import { PreviewPanel } from "../components/preview/PreviewPanel";
+import { useJobRunner } from "../hooks/useJobRunner";
+import { useRecentWorks } from "../hooks/useRecentWorks";
+import { fetchManifest, fetchPreviewConfig, getAssetUrl } from "../lib/api";
+import { saveRecentWork } from "../lib/storage";
+import type { Manifest } from "../types/manifest";
+import type { PreviewConfig } from "../types/previewConfig";
 import "./pages.css";
 
-const steps = [
-  { id: "prompt", label: "Step 1: Prompt" },
-  { id: "options", label: "Step 2: Options" },
-  { id: "preview", label: "Step 3: Preview" },
+type MessageRole = "user" | "system" | "tool" | "result";
+type ChatMessage = {
+  id: string;
+  role: MessageRole;
+  content: string;
+};
+
+type SelectOption = {
+  value: string;
+  label: string;
+};
+
+type InspectorStage = "choosing_options" | "running" | "complete";
+type InspectorTab = "preview" | "assets" | "export";
+
+const INSPECTOR_STAGE_LABELS: Record<InspectorStage, string> = {
+  choosing_options: "参数",
+  running: "生成中",
+  complete: "交付",
+};
+
+const STYLE_OPTIONS = [
+  {
+    id: "cinematic",
+    title: "电影感",
+    description: "高对比光影与大片构图。",
+  },
+  {
+    id: "anime",
+    title: "动漫",
+    description: "线条化渲染与高饱和色彩。",
+  },
+  {
+    id: "low_poly",
+    title: "低多边形",
+    description: "块面几何与简化质感。",
+  },
+  {
+    id: "realistic",
+    title: "写实",
+    description: "真实光照与细节层次。",
+  },
 ];
 
-export const CreatePage = () => {
-  const [activeStep, setActiveStep] = useState("preview");
-  const [jobIdInput, setJobIdInput] = useState("");
-  const [jobId, setJobId] = useState("");
+const MOOD_OPTIONS = [
+  { id: "epic", label: "史诗" },
+  { id: "calm", label: "平静" },
+  { id: "horror", label: "恐怖" },
+];
 
-  const applyJobId = () => {
-    setJobId(jobIdInput.trim());
+const MODEL_OPTIONS: SelectOption[] = [
+  { value: "atlas_3_preview", label: "Atlas-3 预览" },
+  { value: "atlas_3_pro", label: "Atlas-3 高级" },
+];
+
+const RESOLUTION_PRESETS = [
+  { id: "panorama_2k", label: "全景 2K (2048×1024)", value: [2048, 1024] as [number, number] },
+  { id: "1080p", label: "1080p (1920×1080)", value: [1920, 1080] as [number, number] },
+  { id: "720p", label: "720p (1280×720)", value: [1280, 720] as [number, number] },
+];
+
+const RESOLUTION_SELECT_OPTIONS: SelectOption[] = RESOLUTION_PRESETS.map((preset) => ({
+  value: preset.id,
+  label: preset.label,
+}));
+
+const EXPORT_PRESETS = [
+  { value: "mp4_720p", label: "720p（1280×720）" },
+  { value: "mp4_1080p", label: "1080p（1920×1080）" },
+  { value: "mp4_4k", label: "4K（3840×2160）" },
+];
+
+const STAGE_LABELS: Record<string, string> = {
+  QUEUED: "排队中",
+  PLANNING: "规划",
+  RUNNING_MOTION: "动作",
+  RUNNING_SCENE: "场景",
+  RUNNING_MUSIC: "音乐",
+  COMPOSING_PREVIEW: "预览合成",
+  EXPORTING_VIDEO: "导出",
+  DONE: "完成",
+  FAILED: "失败",
+  CANCELED: "已取消",
+  ERROR: "错误",
+};
+
+const resolveStageLabel = (stage?: string, status?: string) => {
+  const key = (stage ?? status ?? "").toUpperCase();
+  return STAGE_LABELS[key] ?? stage ?? status ?? "准备中";
+};
+
+const INSPECTOR_STEPS = [
+  { id: "options", label: "参数" },
+  { id: "running", label: "生成" },
+  { id: "review", label: "交付" },
+];
+
+const INSPECTOR_TABS = [
+  { id: "preview", label: "预览" },
+  { id: "assets", label: "素材" },
+  { id: "export", label: "导出" },
+] as const;
+
+const TEMPLATE_SNIPPETS = [
+  { id: "action", label: "动作", template: "动作：" },
+  { id: "shot", label: "镜头", template: "镜头：" },
+  { id: "mood", label: "氛围", template: "氛围：" },
+  { id: "duration", label: "时长", template: "时长：" },
+];
+
+const MAX_RECENT_ITEMS = 10;
+
+const createMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const INITIAL_MESSAGES: ChatMessage[] = [
+  {
+    id: "system-1",
+    role: "system",
+    content:
+      "我是你的创作助理，会把你的描述拆解成镜头、情绪与节奏。右侧面板已准备好记录风格与参数。发送一句话描述，开始构建场景。",
+  },
+];
+
+type SelectMenuProps = {
+  value: string;
+  options: SelectOption[];
+  ariaLabel: string;
+  onChange: (value: string) => void;
+};
+
+const SelectMenu = ({ value, options, ariaLabel, onChange }: SelectMenuProps) => {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointer);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointer);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className={`select-menu${open ? " open" : ""}`} ref={menuRef}>
+      <button
+        type="button"
+        className="select-trigger"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+      >
+        <span>{selected?.label ?? "请选择"}</span>
+        <span className="select-caret" aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="select-panel" role="listbox" aria-label={ariaLabel}>
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`select-option${option.value === value ? " active" : ""}`}
+              role="option"
+              aria-selected={option.value === value}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const CreatePage = () => {
+  const { items: recentWorks } = useRecentWorks();
+  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
+  const [draft, setDraft] = useState("");
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [inspectorStage, setInspectorStage] = useState<InspectorStage>("choosing_options");
+  const [selectedStyle, setSelectedStyle] = useState(STYLE_OPTIONS[0].id);
+  const [selectedMood, setSelectedMood] = useState(MOOD_OPTIONS[0].id);
+  const [duration, setDuration] = useState(14);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advancedSettings, setAdvancedSettings] = useState({
+    model: MODEL_OPTIONS[0].value,
+    seed: "",
+    resolution: RESOLUTION_PRESETS[0].id,
+  });
+  const [exportPreset, setExportPreset] = useState(EXPORT_PRESETS[1]?.value ?? EXPORT_PRESETS[0].value);
+  const [activeTab, setActiveTab] = useState<InspectorTab>("preview");
+  const [toolMessageId, setToolMessageId] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<Manifest | null>(null);
+  const [previewConfig, setPreviewConfig] = useState<PreviewConfig | null>(null);
+  const [previewConfigMissing, setPreviewConfigMissing] = useState(false);
+  const [assetError, setAssetError] = useState<string | null>(null);
+  const [isLoadingAssets, setIsLoadingAssets] = useState(false);
+  const assetsJobRef = useRef<string | null>(null);
+  const chatThreadRef = useRef<HTMLUListElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const recentSaveRef = useRef<string>("");
+
+  const latestPrompt = useMemo(() => {
+    const match = [...messages].reverse().find((message) => message.role === "user");
+    return match?.content ?? "";
+  }, [messages]);
+  const hasPrompt = latestPrompt.trim().length > 0;
+  const canSend = draft.trim().length > 0;
+  const resolutionPreset = useMemo(
+    () => RESOLUTION_PRESETS.find((preset) => preset.id === advancedSettings.resolution),
+    [advancedSettings.resolution]
+  );
+  const seedValue = useMemo(() => {
+    const trimmed = advancedSettings.seed.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const numeric = Number(trimmed);
+    if (!Number.isFinite(numeric)) {
+      return undefined;
+    }
+    return Math.max(0, Math.floor(numeric));
+  }, [advancedSettings.seed]);
+  const jobOptions = useMemo(
+    () => {
+      const advanced: {
+        model?: string;
+        seed?: number;
+        resolution?: [number, number];
+      } = {
+        model: advancedSettings.model,
+      };
+      if (seedValue !== undefined) {
+        advanced.seed = seedValue;
+      }
+      if (resolutionPreset) {
+        advanced.resolution = resolutionPreset.value;
+      }
+      return {
+        style: selectedStyle,
+        mood: selectedMood,
+        duration_s: duration,
+        export_video: true,
+        export_preset: exportPreset,
+        advanced,
+      };
+    },
+    [advancedSettings.model, duration, exportPreset, resolutionPreset, seedValue, selectedMood, selectedStyle]
+  );
+  const {
+    jobId,
+    jobStatus,
+    error: jobError,
+    isStarting,
+    start: startJob,
+    stop,
+  } = useJobRunner(latestPrompt, jobOptions);
+
+  const insertTemplate = useCallback(
+    (template: string) => {
+      const textarea = inputRef.current;
+      if (!textarea) {
+        setDraft((prev) => (prev ? `${prev}\n${template}` : template));
+        return;
+      }
+      const start = textarea.selectionStart ?? draft.length;
+      const end = textarea.selectionEnd ?? draft.length;
+      const before = draft.slice(0, start);
+      const after = draft.slice(end);
+      const needsBreak = before.length > 0 && !before.endsWith("\n");
+      const insertion = `${needsBreak ? "\n" : ""}${template}`;
+      const next = `${before}${insertion}${after}`;
+      setDraft(next);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        const cursor = start + insertion.length;
+        textarea.setSelectionRange(cursor, cursor);
+      });
+    },
+    [draft]
+  );
+
+  const adjustSeed = useCallback((delta: number) => {
+    setAdvancedSettings((prev) => {
+      const current = Number(prev.seed);
+      const base = Number.isFinite(current) ? current : 0;
+      const next = Math.max(0, base + delta);
+      return { ...prev, seed: String(next) };
+    });
+  }, []);
+
+  const handleNewProject = useCallback(() => {
+    stop();
+    setMessages(INITIAL_MESSAGES);
+    setDraft("");
+    setPendingPrompt(null);
+    setToolMessageId(null);
+    setInspectorStage("choosing_options");
+    setActiveTab("preview");
+    setManifest(null);
+    setPreviewConfig(null);
+    setPreviewConfigMissing(false);
+    setAssetError(null);
+    setIsLoadingAssets(false);
+    assetsJobRef.current = null;
+  }, [stop]);
+
+  const activeStepIndex =
+    inspectorStage === "complete" ? 2 : inspectorStage === "running" ? 1 : 0;
+
+  const progressValue =
+    typeof jobStatus?.progress === "number"
+      ? Math.max(0, Math.min(100, Math.round(jobStatus.progress)))
+      : 0;
+  const progressLabel = typeof jobStatus?.progress === "number" ? `${progressValue}%` : "--";
+  const progressStage = resolveStageLabel(jobStatus?.stage, jobStatus?.status);
+  const logLines =
+    jobStatus?.logs_tail && jobStatus.logs_tail.length > 0
+      ? jobStatus.logs_tail.slice(-3)
+      : jobStatus?.message
+        ? [jobStatus.message]
+        : ["等待日志输出..."];
+  const queuePosition = jobStatus?.queue_position;
+  const normalizedJobStatus = jobStatus?.status?.toUpperCase() ?? "";
+  const queueLabel =
+    queuePosition !== undefined
+      ? `#${queuePosition}`
+      : normalizedJobStatus === "QUEUED"
+        ? "排队中"
+        : "--";
+  const isJobDone = normalizedJobStatus === "DONE" || normalizedJobStatus === "COMPLETED";
+  const isJobActive =
+    !!jobStatus && !["DONE", "COMPLETED", "FAILED", "ERROR"].includes(normalizedJobStatus);
+
+  const assetItems = useMemo(() => {
+    const items: Array<{ id: string; label: string; href: string; kind: string }> = [];
+    const seen = new Set<string>();
+    const addItem = (label: string, uri: string | undefined, kind: string) => {
+      if (!uri) {
+        return;
+      }
+      const href = getAssetUrl(uri);
+      if (seen.has(href)) {
+        return;
+      }
+      seen.add(href);
+      items.push({ id: `${kind}-${items.length}`, label, href, kind });
+    };
+
+    const outputs = manifest?.outputs;
+    addItem("场景全景 PNG", outputs?.scene?.panorama?.uri, "png");
+    addItem("动作 BVH", outputs?.motion?.bvh?.uri, "bvh");
+    addItem("配乐 WAV", outputs?.music?.wav?.uri, "wav");
+    addItem("导出 MP4", outputs?.export?.mp4?.uri, "mp4");
+    addItem("导出 ZIP", outputs?.export?.zip?.uri ?? undefined, "zip");
+
+    if (jobStatus) {
+      addItem("预览 MP4", jobStatus.preview_url, "mp4");
+      if (Array.isArray(jobStatus.mp4_list)) {
+        jobStatus.mp4_list.forEach((uri) => addItem("预览 MP4", uri, "mp4"));
+      }
+      addItem("动作 BVH", jobStatus.bvh_download_url ?? jobStatus.download_url, "bvh");
+      addItem("配乐 WAV", jobStatus.audio_url, "wav");
+      addItem("导出 ZIP", jobStatus.zip_url, "zip");
+    }
+
+    return items;
+  }, [jobStatus, manifest]);
+
+  const previewLinks = useMemo(
+    () => assetItems.filter((item) => ["mp4", "wav", "bvh"].includes(item.kind)),
+    [assetItems]
+  );
+  const assetDownloads = useMemo(
+    () => assetItems.filter((item) => ["png", "bvh", "wav"].includes(item.kind)),
+    [assetItems]
+  );
+  const audioPreviewUrl = jobStatus?.audio_url ?? previewConfig?.music?.wav_uri;
+  const audioPreviewSrc = audioPreviewUrl ? getAssetUrl(audioPreviewUrl) : "";
+  const exportMp4 =
+    assetItems.find((item) => item.label.includes("导出 MP4")) ??
+    assetItems.find((item) => item.kind === "mp4");
+
+  const toolMessageContent = useMemo(() => {
+    if (!toolMessageId) {
+      return "";
+    }
+    if (jobError) {
+      return `生成失败：${jobError}`;
+    }
+    if (!jobId) {
+      return "正在创建任务...";
+    }
+    if (!jobStatus) {
+      return `任务已创建（${jobId}），等待事件流连接...`;
+    }
+    const normalizedStatus = jobStatus.status?.toUpperCase();
+    if (normalizedStatus === "DONE" || normalizedStatus === "COMPLETED") {
+      return "生成完成，正在准备预览。";
+    }
+    if (normalizedStatus === "ERROR" || normalizedStatus === "FAILED") {
+      return `生成失败：${jobStatus.message ?? "未知错误"}`;
+    }
+    const toolLogLines =
+      jobStatus.logs_tail && jobStatus.logs_tail.length > 0
+        ? jobStatus.logs_tail.slice(-3)
+        : jobStatus.message
+          ? [jobStatus.message]
+          : [];
+    const logSummary = toolLogLines.length > 0 ? `\n${toolLogLines.join("\n")}` : "";
+    return `生成中 ${progressLabel} · ${progressStage}${logSummary}`;
+  }, [jobError, jobId, jobStatus, progressLabel, progressStage, toolMessageId]);
+
+  const handleSend = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      return;
+    }
+    setMessages((prev) => [
+      ...prev,
+      { id: createMessageId(), role: "user", content: trimmed },
+      { id: createMessageId(), role: "system", content: "正在规划..." },
+    ]);
+    setDraft("");
+    setToolMessageId(null);
+    setInspectorStage("choosing_options");
+    setPendingPrompt(trimmed);
+  };
+
+  useEffect(() => {
+    if (!toolMessageId || !toolMessageContent) {
+      return;
+    }
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === toolMessageId ? { ...message, content: toolMessageContent } : message
+      )
+    );
+  }, [toolMessageContent, toolMessageId]);
+
+  useEffect(() => {
+    if (!jobStatus) {
+      return;
+    }
+    const normalizedStatus = jobStatus.status?.toUpperCase();
+    if (normalizedStatus === "DONE" || normalizedStatus === "COMPLETED") {
+      setInspectorStage("complete");
+      setActiveTab("preview");
+    }
+  }, [jobStatus]);
+
+  useEffect(() => {
+    if (!jobId || !isJobDone) {
+      return;
+    }
+    if (assetsJobRef.current === jobId) {
+      return;
+    }
+    assetsJobRef.current = jobId;
+    setManifest(null);
+    setPreviewConfig(null);
+    setPreviewConfigMissing(false);
+    setAssetError(null);
+    setIsLoadingAssets(true);
+
+    let cancelled = false;
+    const loadAssets = async () => {
+      const loadError = (error: unknown) =>
+        error instanceof Error ? error.message : "资源加载失败";
+
+      try {
+        const data = await fetchManifest(jobId);
+        if (!cancelled) {
+          setManifest(data);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const status = (error as { status?: number }).status;
+          if (status && status !== 404) {
+            setAssetError(loadError(error));
+          }
+        }
+      }
+
+      try {
+        const config = await fetchPreviewConfig(jobId);
+        if (!cancelled) {
+          setPreviewConfig(config);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const status = (error as { status?: number }).status;
+          if (status === 404) {
+            setPreviewConfigMissing(true);
+          } else {
+            setAssetError(loadError(error));
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingAssets(false);
+        }
+      }
+    };
+
+    loadAssets();
+    return () => {
+      cancelled = true;
+    };
+  }, [isJobDone, jobId]);
+
+  const handleStartGeneration = useCallback(async () => {
+    if (!hasPrompt || isStarting || isJobActive) {
+      return;
+    }
+    const toolId = `tool-${createMessageId()}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: toolId, role: "tool", content: "正在创建任务..." },
+    ]);
+    setToolMessageId(toolId);
+    setPendingPrompt(null);
+    setInspectorStage("running");
+    setManifest(null);
+    setPreviewConfig(null);
+    setPreviewConfigMissing(false);
+    setAssetError(null);
+    setIsLoadingAssets(false);
+    assetsJobRef.current = null;
+    try {
+      await startJob();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "任务创建失败";
+      setMessages((prev) =>
+        prev.map((item) =>
+          item.id === toolId ? { ...item, content: `创建失败：${message}` } : item
+        )
+      );
+      setInspectorStage("choosing_options");
+    }
+  }, [hasPrompt, isJobActive, isStarting, startJob]);
+
+  useEffect(() => {
+    if (!pendingPrompt) {
+      return;
+    }
+    if (latestPrompt.trim() !== pendingPrompt.trim()) {
+      return;
+    }
+    if (isStarting || isJobActive) {
+      return;
+    }
+    handleStartGeneration();
+    setPendingPrompt(null);
+  }, [handleStartGeneration, isJobActive, isStarting, latestPrompt, pendingPrompt]);
+
+  useEffect(() => {
+    const thread = chatThreadRef.current;
+    if (!thread) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+    });
+  }, [messages]);
+
+  useEffect(() => {
+    if (!jobId || !isJobDone) {
+      return;
+    }
+    if (!manifest && !previewConfig) {
+      return;
+    }
+    const title = (manifest?.inputs?.raw_prompt ?? latestPrompt).trim();
+    const previewUri =
+      manifest?.outputs?.scene?.panorama?.uri ?? previewConfig?.scene?.panorama_uri;
+    const createdAt = manifest?.created_at ?? new Date().toISOString();
+    const signature = JSON.stringify({
+      jobId,
+      title,
+      previewUri: previewUri ?? "",
+      createdAt,
+    });
+    if (recentSaveRef.current === signature) {
+      return;
+    }
+    recentSaveRef.current = signature;
+    const meta: { title?: string; createdAt?: string; previewUrl?: string } = {};
+    if (title) {
+      meta.title = title;
+    }
+    if (createdAt) {
+      meta.createdAt = createdAt;
+    }
+    if (previewUri) {
+      meta.previewUrl = previewUri;
+    }
+    saveRecentWork(jobId, meta);
+  }, [isJobDone, jobId, latestPrompt, manifest, previewConfig]);
+
+  const handleComplete = () => {
+    setInspectorStage("complete");
+    setActiveTab("preview");
   };
 
   return (
     <div className="page create-page">
-      <header className="page-header">
-        <h1 className="page-title">Create</h1>
-        <p className="page-subtitle">Load a preview config for the 3D player.</p>
-      </header>
-      <nav className="step-nav">
-        {steps.map((step) => (
-          <button
-            key={step.id}
-            type="button"
-            className={`step-button ${activeStep === step.id ? "active" : ""}`}
-            onClick={() => setActiveStep(step.id)}
-          >
-            {step.label}
-          </button>
-        ))}
-      </nav>
-      <div className="step-content">
-        {activeStep === "preview" ? (
-          <>
-            <div className="field-row">
-              <label className="field-label" htmlFor="create-job-id">
-                Job ID
-              </label>
-              <input
-                id="create-job-id"
-                className="field-input"
-                placeholder="job_1001"
-                value={jobIdInput}
-                onChange={(event) => setJobIdInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    applyJobId();
-                  }
-                }}
-              />
-              <button type="button" className="field-button" onClick={applyJobId}>
-                Load preview
+      <div className="create-shell">
+        <aside className="create-sidebar">
+          <div className="sidebar-brand">
+            <div className="brand-mark" aria-hidden="true" />
+            <div className="brand-body">
+              <div>
+                <div className="brand-title">Genesis Studio</div>
+                <div className="brand-subtitle">Creative Console</div>
+              </div>
+              <button type="button" className="sidebar-action" onClick={handleNewProject}>
+                新建项目
               </button>
             </div>
-            <PreviewPanel jobId={jobId} />
-          </>
-        ) : (
-          <div className="step-placeholder">
-            This step is stubbed to focus on the preview player.
           </div>
-        )}
+          <nav className="sidebar-nav">
+            <NavLink end to="/" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
+              <span className="nav-dot" aria-hidden="true" />
+              创作
+            </NavLink>
+            <NavLink to="/works" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
+              <span className="nav-dot" aria-hidden="true" />
+              我的作品
+            </NavLink>
+          </nav>
+          <div className="sidebar-recent">
+            <div className="sidebar-panel-title">最近作品</div>
+            {recentWorks.length === 0 ? (
+              <div className="sidebar-recent-empty">暂无作品</div>
+            ) : (
+              <div className="sidebar-recent-list">
+                {recentWorks.slice(0, MAX_RECENT_ITEMS).map((work) => {
+                  const rawTitle =
+                    typeof work.meta.title === "string" ? work.meta.title.trim() : "";
+                  const title = rawTitle || `作品 ${work.jobId}`;
+                  const previewUrl =
+                    typeof work.meta.previewUrl === "string" ? work.meta.previewUrl : undefined;
+                  return (
+                    <NavLink
+                      key={work.jobId}
+                      to={`/works/${work.jobId}`}
+                      className="sidebar-recent-item"
+                    >
+                      <div className="sidebar-recent-thumb">
+                        {previewUrl ? (
+                          <img src={getAssetUrl(previewUrl)} alt={title} loading="lazy" />
+                        ) : (
+                          <div className="sidebar-recent-placeholder">暂无预览</div>
+                        )}
+                      </div>
+                      <div className="sidebar-recent-info">
+                        <div className="sidebar-recent-title">{title}</div>
+                      </div>
+                    </NavLink>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="sidebar-panel">
+            <div className="sidebar-panel-title">会话</div>
+            <div className="sidebar-panel-item">模型：Atlas-3 Preview</div>
+            <div className="sidebar-panel-item">模式：Storyboard</div>
+          </div>
+        </aside>
+
+        <main className="create-chat">
+          <div className="chat-header">
+            <div className="chat-header-main">
+              <div className="chat-title">创作助理</div>
+              <div className="chat-subtitle">一句话描述场景，系统会在侧栏拆解风格与节奏。</div>
+            </div>
+            <div className="chat-header-right">
+              <div className="chat-meta">
+                <span className="meta-pill">Atlas-3 Preview</span>
+                <span className="meta-pill">Storyboard</span>
+              </div>
+              <div className="chat-status">
+                <span className="status-dot" aria-hidden="true" />
+                在线
+              </div>
+            </div>
+          </div>
+
+          <div className="chat-panel">
+            <ul className="chat-thread" ref={chatThreadRef}>
+              {messages.map((message) => (
+                <li key={message.id} className={`chat-message chat-message-${message.role}`}>
+                  <div className="chat-message-content">{message.content}</div>
+                </li>
+              ))}
+            </ul>
+
+            <form
+              className="chat-input"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleSend();
+              }}
+            >
+              <div className="chat-input-field">
+                <div className="chat-template-row">
+                  {TEMPLATE_SNIPPETS.map((snippet) => (
+                    <button
+                      key={snippet.id}
+                      type="button"
+                      className="chat-template-button"
+                      onClick={() => insertTemplate(snippet.template)}
+                    >
+                      {snippet.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="chat-input-box">
+                  <textarea
+                    ref={inputRef}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        handleSend();
+                      }
+                    }}
+                    placeholder="描述你的场景、光线、动作与配乐..."
+                    rows={3}
+                  />
+                  <button
+                    type="submit"
+                    className="send-button"
+                    disabled={!canSend}
+                    aria-label="发送"
+                  >
+                    <svg
+                      className="button-icon"
+                      viewBox="0 0 20 20"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <path
+                        d="M4 10h9"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M10 5l5 5-5 5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <div className="chat-input-hint">Enter 发送，Shift + Enter 换行。</div>
+              </div>
+            </form>
+          </div>
+        </main>
+
+        <aside className="create-inspector">
+          <div className="inspector-card">
+            <div className="inspector-header">
+              <div>
+                <div className="inspector-title">参数面板</div>
+                <div className="inspector-subtitle">
+                  {inspectorStage === "choosing_options" && "选择风格与节奏，让系统开始生成。"}
+                  {inspectorStage === "running" && "生成中，正在整理场景与素材。"}
+                  {inspectorStage === "complete" && "查看预览与导出设置。"}
+                </div>
+              </div>
+              <div className="inspector-stage-pill">{INSPECTOR_STAGE_LABELS[inspectorStage]}</div>
+            </div>
+
+            <div className="inspector-steps">
+              {INSPECTOR_STEPS.map((step, index) => {
+                const status =
+                  index === activeStepIndex ? "active" : index < activeStepIndex ? "complete" : "";
+                return (
+                  <div key={step.id} className={`inspector-step ${status}`}>
+                    <span className="step-index">{index + 1}</span>
+                    <span className="step-label">{step.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="inspector-body">
+              {inspectorStage === "choosing_options" && (
+                <>
+                  {!hasPrompt && (
+                    <div className="inspector-callout">发送提示词以解锁生成参数。</div>
+                  )}
+                  <div className="inspector-section">
+                    <div className="inspector-section-title">风格</div>
+                    <div className="style-grid">
+                      {STYLE_OPTIONS.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={`style-card ${selectedStyle === option.id ? "active" : ""}`}
+                          onClick={() => setSelectedStyle(option.id)}
+                        >
+                          <div className="style-card-title">{option.title}</div>
+                          <div className="style-card-description">{option.description}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="inspector-section">
+                    <div className="inspector-section-title">情绪</div>
+                    <div className="mood-row">
+                      {MOOD_OPTIONS.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={`mood-chip ${selectedMood === option.id ? "active" : ""}`}
+                          onClick={() => setSelectedMood(option.id)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="inspector-section">
+                    <div className="duration-row">
+                      <div className="inspector-section-title">时长</div>
+                      <div className="duration-value">{duration}s</div>
+                    </div>
+                    <input
+                      className="duration-slider"
+                      type="range"
+                      min={5}
+                      max={30}
+                      step={1}
+                      value={duration}
+                      onChange={(event) => setDuration(Number(event.target.value))}
+                    />
+                    <div className="duration-hint">片段越短，生成速度越快。</div>
+                  </div>
+
+                  <div className="inspector-section advanced-settings">
+                    <button
+                      type="button"
+                      className="advanced-toggle"
+                      aria-expanded={advancedOpen}
+                      aria-controls="advanced-settings"
+                      onClick={() => setAdvancedOpen((prev) => !prev)}
+                    >
+                      高级设置
+                      <span className="advanced-toggle-icon" aria-hidden="true" />
+                    </button>
+                    {advancedOpen && (
+                      <div className="advanced-panel" id="advanced-settings">
+                        <label className="field-row">
+                          <span>模型</span>
+                          <SelectMenu
+                            value={advancedSettings.model}
+                            options={MODEL_OPTIONS}
+                            ariaLabel="模型"
+                            onChange={(value) =>
+                              setAdvancedSettings((prev) => ({
+                                ...prev,
+                                model: value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="field-row">
+                          <span>随机种子</span>
+                          <div className="seed-field">
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              placeholder="自动"
+                              value={advancedSettings.seed}
+                              onChange={(event) =>
+                                setAdvancedSettings((prev) => ({
+                                  ...prev,
+                                  seed: event.target.value,
+                                }))
+                              }
+                            />
+                            <div className="seed-stepper">
+                              <button
+                                type="button"
+                                className="seed-stepper-button"
+                                onClick={() => adjustSeed(1)}
+                                aria-label="增加随机种子"
+                              >
+                                <svg viewBox="0 0 12 12" aria-hidden="true">
+                                  <path
+                                    d="M3 7l3-3 3 3"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.4"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                className="seed-stepper-button"
+                                onClick={() => adjustSeed(-1)}
+                                aria-label="减少随机种子"
+                              >
+                                <svg viewBox="0 0 12 12" aria-hidden="true">
+                                  <path
+                                    d="M3 5l3 3 3-3"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.4"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        </label>
+                        <label className="field-row">
+                          <span>分辨率</span>
+                          <SelectMenu
+                            value={advancedSettings.resolution}
+                            options={RESOLUTION_SELECT_OPTIONS}
+                            ariaLabel="分辨率"
+                            onChange={(value) =>
+                              setAdvancedSettings((prev) => ({
+                                ...prev,
+                                resolution: value,
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={!hasPrompt || isStarting || isJobActive}
+                    onClick={handleStartGeneration}
+                  >
+                    <span>开始生成</span>
+                    <svg className="button-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                      <path d="M6 4l10 6-10 6z" fill="currentColor" />
+                    </svg>
+                  </button>
+                </>
+              )}
+
+              {inspectorStage === "running" && (
+                <>
+                <div className="inspector-progress">
+                  <div className="progress-header">
+                    <div>
+                      <div className="progress-title">生成中</div>
+                      <div className="progress-subtitle">阶段：{progressStage}</div>
+                      <div className="progress-meta">队列位置：{queueLabel}</div>
+                    </div>
+                    <div className="progress-value">{progressLabel}</div>
+                  </div>
+                    <div className="progress-bar">
+                      <div className="progress-fill" style={{ width: `${progressValue}%` }} />
+                    </div>
+                  </div>
+
+                  <div className="log-panel">
+                    <div className="log-panel-title">实时日志</div>
+                    <ul className="log-list">
+                      {logLines.map((line, index) => (
+                        <li key={`${index}-${line}`}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <button type="button" className="ghost-button" onClick={handleComplete}>
+                    <span>查看结果</span>
+                    <svg className="button-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                      <path
+                        d="M4 10h9"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M10 5l5 5-5 5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </>
+              )}
+
+              {inspectorStage === "complete" && (
+                <>
+                  <div className="inspector-tabs">
+                    {INSPECTOR_TABS.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        className={`inspector-tab ${activeTab === tab.id ? "active" : ""}`}
+                        onClick={() => setActiveTab(tab.id)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="inspector-tab-content">
+                    {activeTab === "preview" && (
+                      <>
+                        {previewConfig ? (
+                          <div className="preview-panel-wrapper">
+                            <PreviewPanel
+                              jobId={jobId ?? undefined}
+                              config={previewConfig}
+                              emptyMessage="预览配置已加载。"
+                            />
+                          </div>
+                        ) : (
+                          <div className="preview-fallback">
+                            {previewConfigMissing && (
+                              <div className="preview-fallback-banner">
+                                后端尚未生成 preview_config，已降级为资源链接。
+                              </div>
+                            )}
+                            {assetError && (
+                              <div className="preview-fallback-banner preview-fallback-error">
+                                {assetError}
+                              </div>
+                            )}
+                            {isLoadingAssets && (
+                              <div className="preview-placeholder-screen">
+                                <div className="preview-placeholder-hint">正在加载预览资源...</div>
+                              </div>
+                            )}
+                            {!isLoadingAssets && (
+                              <>
+                                <div className="preview-placeholder-screen">
+                                  <div className="preview-placeholder-hint">预览配置不可用</div>
+                                </div>
+                                <div className="preview-placeholder-meta">
+                                  <div className="preview-placeholder-title">可用资源</div>
+                                  <div className="preview-placeholder-subtitle">
+                                    点击以下链接打开或下载。
+                                  </div>
+                                </div>
+                                <div className="preview-link-list">
+                                  {previewLinks.length > 0 ? (
+                                    previewLinks.map((item) => (
+                                      <a
+                                        key={item.id}
+                                        href={item.href}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="preview-link"
+                                      >
+                                        {item.label}
+                                      </a>
+                                    ))
+                                  ) : (
+                                    <div className="preview-placeholder-subtitle">
+                                      暂无可用预览资源。
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {audioPreviewSrc ? (
+                          <div className="preview-audio">
+                            <div className="preview-audio-title">音频预览</div>
+                            <audio controls src={audioPreviewSrc} preload="none" />
+                          </div>
+                        ) : (
+                          <div className="preview-audio-empty">暂无音频</div>
+                        )}
+                      </>
+                    )}
+                    {activeTab === "assets" && (
+                      <div className="assets-panel">
+                        {isLoadingAssets && (
+                          <div className="inspector-callout">正在加载资产清单...</div>
+                        )}
+                        {!isLoadingAssets && assetError && (
+                          <div className="inspector-callout">{assetError}</div>
+                        )}
+                        {!isLoadingAssets && assetDownloads.length === 0 && (
+                          <div className="inspector-callout">暂无可下载资源。</div>
+                        )}
+                        {!isLoadingAssets && assetDownloads.length > 0 && (
+                          <div className="placeholder-grid">
+                            {assetDownloads.map((item) => (
+                              <div key={item.id} className="placeholder-card">
+                                <div className="placeholder-title">{item.label}</div>
+                                <a
+                                  className="asset-link"
+                                  href={item.href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  打开/下载
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {activeTab === "export" && (
+                      <div className="export-panel">
+                        <div className="export-settings">
+                          <label className="export-field">
+                            <span>导出预设</span>
+                            <select
+                              value={exportPreset}
+                              onChange={(event) => setExportPreset(event.target.value)}
+                            >
+                              {EXPORT_PRESETS.map((preset) => (
+                                <option key={preset.value} value={preset.value}>
+                                  {preset.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <div className="export-actions">
+                          {exportMp4 ? (
+                            <a className="primary-button export-button" href={exportMp4.href} download>
+                              导出视频
+                            </a>
+                          ) : (
+                            <button type="button" className="primary-button export-button" disabled>
+                              导出视频
+                            </button>
+                          )}
+                          <div className="export-note">
+                            {exportMp4
+                              ? "视频已生成，可直接下载。"
+                              : "导出资源尚未生成或导出服务未接入。"}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   );

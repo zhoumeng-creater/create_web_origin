@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { LibraryFilters } from "../components/library/LibraryFilters";
+import { LibraryCommandBar } from "../components/library/LibraryCommandBar";
+import { LibraryFilterDrawer } from "../components/library/LibraryFilterDrawer";
+import type { FilterOption } from "../components/library/LibraryFilters";
 import { WorkCard } from "../components/library/WorkCard";
 import { useRecentWorks } from "../hooks/useRecentWorks";
 import { fetchManifest } from "../lib/api";
@@ -27,17 +29,17 @@ type WorkSummary = {
   error?: string;
 };
 
-const durationOptions = [
-  { value: "any", label: "Any duration" },
-  { value: "short", label: "0-10s" },
-  { value: "medium", label: "10-30s" },
-  { value: "long", label: "30s+" },
+const durationOptions: FilterOption[] = [
+  { value: "any", label: "不限时长" },
+  { value: "short", label: "0-10秒" },
+  { value: "medium", label: "10-30秒" },
+  { value: "long", label: "30秒以上" },
 ];
 
-const dateOptions = [
-  { value: "any", label: "Any date" },
-  { value: "has", label: "Has date" },
-  { value: "none", label: "No date" },
+const dateOptions: FilterOption[] = [
+  { value: "any", label: "不限日期" },
+  { value: "has", label: "有日期" },
+  { value: "none", label: "无日期" },
 ];
 
 const truncate = (value: string, max = 64) =>
@@ -50,7 +52,7 @@ const toErrorMessage = (error: unknown) => {
   if (typeof error === "string") {
     return error;
   }
-  return "Failed to load manifest.";
+  return "加载清单失败。";
 };
 
 const getDuration = (manifest?: Manifest): number | undefined =>
@@ -84,6 +86,7 @@ export const LibraryPage = () => {
   const [styleFilter, setStyleFilter] = useState("all");
   const [durationFilter, setDurationFilter] = useState("any");
   const [dateFilter, setDateFilter] = useState("any");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const updateManifestMap = useCallback(
     (updater: (prev: Record<string, ManifestEntry>) => Record<string, ManifestEntry>) => {
@@ -147,7 +150,7 @@ export const LibraryPage = () => {
       const entry = manifestMap[item.jobId];
       const manifest = entry && entry.status === "ready" ? entry.manifest : undefined;
       const prompt = manifest?.inputs?.raw_prompt;
-      const title = prompt ? truncate(prompt) : `Work ${item.jobId}`;
+      const title = prompt ? truncate(prompt) : `作品 ${item.jobId}`;
       return {
         jobId: item.jobId,
         title,
@@ -173,15 +176,80 @@ export const LibraryPage = () => {
         hasUnknown = true;
       }
     });
-    const options = [{ value: "all", label: "All styles" }];
+    const options = [{ value: "all", label: "全部风格" }];
     Array.from(styles)
       .sort((a, b) => a.localeCompare(b))
       .forEach((style) => options.push({ value: style, label: style }));
     if (hasUnknown) {
-      options.push({ value: "unknown", label: "Unknown" });
+      options.push({ value: "unknown", label: "未知" });
     }
     return options;
   }, [works]);
+
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{ id: string; label: string; onClear: () => void }> = [];
+    const trimmedQuery = query.trim();
+    if (trimmedQuery) {
+      chips.push({
+        id: "query",
+        label: `搜索：${truncate(trimmedQuery, 32)}`,
+        onClear: () => setQuery(""),
+      });
+    }
+    if (styleFilter !== "all") {
+      const styleLabel =
+        styleOptions.find((option) => option.value === styleFilter)?.label ?? styleFilter;
+      chips.push({
+        id: "style",
+        label: `风格：${styleLabel}`,
+        onClear: () => setStyleFilter("all"),
+      });
+    }
+    if (durationFilter !== "any") {
+      const durationLabel =
+        durationOptions.find((option) => option.value === durationFilter)?.label ??
+        durationFilter;
+      chips.push({
+        id: "duration",
+        label: `时长：${durationLabel}`,
+        onClear: () => setDurationFilter("any"),
+      });
+    }
+    if (dateFilter !== "any") {
+      const dateLabel =
+        dateOptions.find((option) => option.value === dateFilter)?.label ?? dateFilter;
+      chips.push({
+        id: "date",
+        label: `日期：${dateLabel}`,
+        onClear: () => setDateFilter("any"),
+      });
+    }
+    return chips;
+  }, [
+    dateFilter,
+    durationFilter,
+    query,
+    setDateFilter,
+    setDurationFilter,
+    setQuery,
+    setStyleFilter,
+    styleFilter,
+    styleOptions,
+  ]);
+
+  const filterCount = useMemo(() => {
+    let count = 0;
+    if (styleFilter !== "all") {
+      count += 1;
+    }
+    if (durationFilter !== "any") {
+      count += 1;
+    }
+    if (dateFilter !== "any") {
+      count += 1;
+    }
+    return count;
+  }, [dateFilter, durationFilter, styleFilter]);
 
   const filteredWorks = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -217,36 +285,27 @@ export const LibraryPage = () => {
   return (
     <div className="page library-page">
       <header className="page-header library-header">
-        <div>
-          <h1 className="page-title">Library</h1>
-          <p className="page-subtitle">Browse recent works saved locally.</p>
+        <div className="library-title-block">
+          <h1 className="page-title">我的作品</h1>
+          <p className="page-subtitle">本地保存的最近作品。</p>
         </div>
-        <div className="library-count">
-          {filteredWorks.length} of {works.length} works
-        </div>
+        <div className="library-count">共 {filteredWorks.length} 条</div>
       </header>
-      <LibraryFilters
+      <LibraryCommandBar
         query={query}
-        style={styleFilter}
-        duration={durationFilter}
-        date={dateFilter}
-        styleOptions={styleOptions}
-        durationOptions={durationOptions}
-        dateOptions={dateOptions}
+        filterCount={filterCount}
+        chips={activeFilterChips}
+        isFiltersOpen={filtersOpen}
         onQueryChange={setQuery}
-        onStyleChange={setStyleFilter}
-        onDurationChange={setDurationFilter}
-        onDateChange={setDateFilter}
-        onClear={() => {
-          setQuery("");
-          setStyleFilter("all");
-          setDurationFilter("any");
-          setDateFilter("any");
-        }}
+        onOpenFilters={() => setFiltersOpen(true)}
       />
       {filteredWorks.length === 0 ? (
         <div className="library-empty">
-          No works match the current filters. Create a new job to populate this list.
+          <div className="library-empty-title">暂无匹配结果</div>
+          <div className="library-empty-subtitle">调整筛选条件或开始新的创作。</div>
+          <a className="library-empty-action" href="/">
+            开始创作
+          </a>
         </div>
       ) : (
         <div className="library-grid">
@@ -255,7 +314,6 @@ export const LibraryPage = () => {
               key={work.jobId}
               jobId={work.jobId}
               title={work.title}
-              prompt={work.prompt}
               thumbnailUri={work.thumbnailUri}
               style={work.style}
               duration={work.duration}
@@ -268,6 +326,24 @@ export const LibraryPage = () => {
           ))}
         </div>
       )}
+      <LibraryFilterDrawer
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        style={styleFilter}
+        duration={durationFilter}
+        date={dateFilter}
+        styleOptions={styleOptions}
+        durationOptions={durationOptions}
+        dateOptions={dateOptions}
+        onStyleChange={setStyleFilter}
+        onDurationChange={setDurationFilter}
+        onDateChange={setDateFilter}
+        onClear={() => {
+          setStyleFilter("all");
+          setDurationFilter("any");
+          setDateFilter("any");
+        }}
+      />
     </div>
   );
 };

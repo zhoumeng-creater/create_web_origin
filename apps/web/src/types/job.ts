@@ -1,11 +1,33 @@
 import { z } from "zod";
 
+const queuePositionSchema = z.preprocess(
+  (value) => {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return undefined;
+      }
+      const numeric = Number(trimmed);
+      return Number.isNaN(numeric) ? value : numeric;
+    }
+    return value;
+  },
+  z.number().optional()
+);
+
 export const jobStatusSchema = z.object({
   status: z.string(),
   progress: z.number().optional(),
   stage: z.string().optional(),
   message: z.string().optional(),
   logs_tail: z.array(z.string()).optional(),
+  queue_position: queuePositionSchema,
+  preview_url: z.string().optional(),
+  audio_url: z.string().optional(),
+  bvh_download_url: z.string().optional(),
+  download_url: z.string().optional(),
+  mp4_list: z.array(z.string()).optional(),
+  zip_url: z.string().optional(),
   partial_assets: z.unknown().optional(),
 });
 

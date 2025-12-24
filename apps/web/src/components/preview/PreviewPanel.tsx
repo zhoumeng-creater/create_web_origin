@@ -20,7 +20,7 @@ export const PreviewPanel = ({
   loading,
   error,
   onRetry,
-  emptyMessage = "Enter a job id to load preview.",
+  emptyMessage = "请输入任务 ID 加载预览。",
 }: PreviewPanelProps) => {
   const trimmedJobId = useMemo(() => jobId?.trim(), [jobId]);
   const effectiveJobId = config ? null : trimmedJobId;
@@ -35,16 +35,16 @@ export const PreviewPanel = ({
   }
 
   if (resolvedLoading) {
-    return <div className="preview-panel-state">Loading preview config...</div>;
+    return <div className="preview-panel-state">正在加载预览配置...</div>;
   }
 
   if (resolvedError) {
     return (
       <div className="preview-panel-state">
-        <div className="preview-panel-title">Preview config failed</div>
+        <div className="preview-panel-title">预览配置加载失败</div>
         <div className="preview-panel-message">{resolvedError}</div>
         <button type="button" onClick={retryHandler}>
-          Retry
+          重试
         </button>
       </div>
     );

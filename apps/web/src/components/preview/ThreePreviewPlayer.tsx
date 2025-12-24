@@ -208,12 +208,12 @@ export const ThreePreviewPlayer = ({
           </Canvas>
         </SceneErrorBoundary>
         {loading && !error ? (
-          <div className="three-preview-overlay">Loading preview...</div>
+          <div className="three-preview-overlay">正在加载预览...</div>
         ) : null}
         {error ? (
           <div className="three-preview-overlay error">
             <div>
-              <div className="three-preview-overlay-title">Preview error</div>
+              <div className="three-preview-overlay-title">预览加载失败</div>
               <div className="three-preview-overlay-message">{error}</div>
             </div>
           </div>
